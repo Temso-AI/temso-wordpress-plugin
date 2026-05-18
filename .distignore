@@ -16,6 +16,8 @@
 /vendor
 /composer.json
 /composer.lock
+/composer.phar
+/Makefile
 /release-please-config.json
 /.release-please-manifest.json
 /CHANGELOG.md

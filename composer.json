@@ -18,7 +18,10 @@
 		"allow-plugins": {
 			"dealerdirect/phpcodesniffer-composer-installer": true
 		},
-		"sort-packages": true
+		"sort-packages": true,
+		"platform": {
+			"php": "7.4"
+		}
 	},
 	"scripts": {
 		"lint": "find temso-ai.php uninstall.php includes -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null",

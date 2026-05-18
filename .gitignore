@@ -1,6 +1,7 @@
 # Dependencies
 /node_modules/
 /vendor/
+/composer.phar
 
 # Build / dist artifacts
 /build/
