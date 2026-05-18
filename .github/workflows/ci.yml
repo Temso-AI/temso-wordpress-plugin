@@ -9,9 +9,52 @@ on:
 permissions:
   contents: read
 
+# Collapse superseded PR runs; never cancel a main run, so an in-flight
+# release (release-please / attach-assets) is never interrupted.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
-    uses: ./.github/workflows/test.yml
+    name: Test (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['7.4', '8.4']
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
+          coverage: none
+
+      - name: Resolve Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php${{ matrix.php }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-php${{ matrix.php }}-composer-
+
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Lint (php -l)
+        run: composer run-script lint
+
+      - name: WordPress Coding Standards
+        run: composer run-script phpcs
+
+      - name: PHPUnit
+        run: composer run-script test
 
   build:
     name: Build package
@@ -30,3 +73,54 @@ jobs:
           path: dist/temso-ai-*.zip
           if-no-files-found: error
           retention-days: 30
+
+  release-please:
+    name: Release PR / tag
+    needs: test
+    # Only on a real push to main; never on pull requests.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Opens/maintains a "release" PR that bumps the version everywhere and
+      # updates CHANGELOG.md from Conventional Commits. Merging that PR is what
+      # creates the tag + GitHub release used below.
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          # Falls back to GITHUB_TOKEN when the secret is absent, so this is a
+          # no-op until you opt in. Set a RELEASE_PLEASE_TOKEN secret (a PAT or
+          # GitHub App token with contents+pull-requests write) to bypass the
+          # "GitHub Actions cannot create pull requests" org/repo policy.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  attach-assets:
+    name: Build & attach plugin zip
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The release-please-created tag does not re-trigger this workflow (tags
+      # pushed with GITHUB_TOKEN don't start new workflow runs), so the
+      # packaged zip Temso_Updater downloads is attached here instead.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Build plugin zip
+        run: bash bin/build.sh
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG_NAME" dist/temso-ai.zip dist/temso-ai-*.zip --clobber
