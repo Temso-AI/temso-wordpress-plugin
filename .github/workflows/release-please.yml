@@ -1,0 +1,48 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: Release PR / tag
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      # Opens/maintains a "release" PR that bumps the version everywhere and
+      # updates CHANGELOG.md from Conventional Commits. Merging that PR is what
+      # creates the tag + GitHub release used below.
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  attach-assets:
+    name: Build & attach plugin zip
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # The release-please-created tag does not re-trigger the tag-driven CI
+      # release job (tags pushed with GITHUB_TOKEN don't start new workflows),
+      # so the packaged zip Temso_Updater downloads is attached here instead.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Build plugin zip
+        run: bash bin/build.sh
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "$TAG_NAME" dist/temso-ai.zip dist/temso-ai-*.zip --clobber

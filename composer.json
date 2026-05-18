@@ -1,0 +1,35 @@
+{
+	"name": "temso/temso-wordpress-plugin",
+	"description": "Captures front-end requests at your WordPress origin and streams them to Temso.",
+	"type": "wordpress-plugin",
+	"license": "GPL-2.0-or-later",
+	"homepage": "https://temso.ai",
+	"require": {
+		"php": ">=7.4"
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^9.6",
+		"brain/monkey": "^2.6",
+		"squizlabs/php_codesniffer": "^3.9",
+		"wp-coding-standards/wpcs": "^3.1",
+		"dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+	},
+	"config": {
+		"allow-plugins": {
+			"dealerdirect/phpcodesniffer-composer-installer": true
+		},
+		"sort-packages": true
+	},
+	"scripts": {
+		"lint": "find temso-ai.php uninstall.php includes -name '*.php' -print0 | xargs -0 -n1 -P4 php -l > /dev/null",
+		"phpcs": "phpcs",
+		"phpcbf": "phpcbf",
+		"test": "phpunit",
+		"build": "bin/build.sh",
+		"check": [
+			"@lint",
+			"@phpcs",
+			"@test"
+		]
+	}
+}

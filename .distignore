@@ -1,0 +1,28 @@
+# Files excluded from the distributed plugin zip.
+# Keep the shipped package to just the runnable plugin.
+
+/.git
+/.github
+/.claude
+/.idea
+/.vscode
+/.wordpress-org
+/.gitignore
+/.distignore
+/.editorconfig
+/tests
+/bin
+/node_modules
+/vendor
+/composer.json
+/composer.lock
+/release-please-config.json
+/.release-please-manifest.json
+/CHANGELOG.md
+/phpunit.xml.dist
+/phpcs.xml.dist
+/CONTRIBUTING.md
+/build
+/dist
+*.zip
+*.log
