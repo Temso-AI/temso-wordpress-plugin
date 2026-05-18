@@ -11,40 +11,14 @@ permissions:
 
 jobs:
   test:
-    name: Test (PHP ${{ matrix.php }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        php: ['7.4', '8.4']
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ matrix.php }}
-          tools: composer:v2
-          coverage: none
-
-      - name: Install dependencies
-        run: composer install --no-interaction --no-progress --prefer-dist
-
-      - name: Lint (php -l)
-        run: composer run-script lint
-
-      - name: WordPress Coding Standards
-        run: composer run-script phpcs
-
-      - name: PHPUnit
-        run: composer run-script test
+    uses: ./.github/workflows/test.yml
 
   build:
     name: Build package
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build plugin zip
         run: bash bin/build.sh

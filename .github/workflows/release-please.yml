@@ -9,8 +9,12 @@ permissions:
   pull-requests: write
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   release-please:
     name: Release PR / tag
+    needs: test
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -34,7 +38,7 @@ jobs:
       # The release-please-created tag does not re-trigger the tag-driven CI
       # release job (tags pushed with GITHUB_TOKEN don't start new workflows),
       # so the packaged zip Temso_Updater downloads is attached here instead.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
