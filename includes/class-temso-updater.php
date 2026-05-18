@@ -18,6 +18,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * GitHub-release update checker for non-wordpress.org installs.
+ */
 class Temso_Updater {
 
 	const CACHE_KEY = 'temso_gh_release';
@@ -38,11 +41,17 @@ class Temso_Updater {
 	 */
 	private $basename;
 
+	/**
+	 * Resolve the configured repo and this plugin's basename.
+	 */
 	public function __construct() {
 		$this->repo     = defined( 'TEMSO_GH_REPO' ) ? (string) TEMSO_GH_REPO : '';
 		$this->basename = plugin_basename( TEMSO_FILE );
 	}
 
+	/**
+	 * Hook into core's update and plugin-info APIs when a repo is configured.
+	 */
 	public function boot() {
 		if ( '' === $this->repo ) {
 			return;
@@ -122,6 +131,8 @@ class Temso_Updater {
 	}
 
 	/**
+	 * Advertise a newer GitHub release to core's plugin updater.
+	 *
 	 * @param mixed $transient The update_plugins site transient.
 	 * @return mixed
 	 */
@@ -151,6 +162,8 @@ class Temso_Updater {
 	}
 
 	/**
+	 * Supply plugin-information modal data from the GitHub release.
+	 *
 	 * @param mixed  $result The plugins_api result.
 	 * @param string $action The requested action.
 	 * @param object $args   Request args.

@@ -12,28 +12,37 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Warns the admin when a full-page caching plugin is active.
+ */
 class Temso_Cache_Detect {
 
 	const DISMISS_META  = 'temso_cache_notice_dismissed';
 	const DISMISS_PARAM = 'temso_dismiss_cache_notice';
 
 	/**
-	 * plugin file => human label.
+	 * Plugin file => human label.
 	 *
 	 * @var array
 	 */
 	private $known = array(
-		'wp-rocket/wp-rocket.php'                 => 'WP Rocket',
-		'w3-total-cache/w3-total-cache.php'       => 'W3 Total Cache',
-		'litespeed-cache/litespeed-cache.php'     => 'LiteSpeed Cache',
-		'wp-super-cache/wp-cache.php'             => 'WP Super Cache',
+		'wp-rocket/wp-rocket.php'             => 'WP Rocket',
+		'w3-total-cache/w3-total-cache.php'   => 'W3 Total Cache',
+		'litespeed-cache/litespeed-cache.php' => 'LiteSpeed Cache',
+		'wp-super-cache/wp-cache.php'         => 'WP Super Cache',
 	);
 
+	/**
+	 * Register the admin-notice and dismissal hooks.
+	 */
 	public function boot() {
 		add_action( 'admin_notices', array( $this, 'maybe_notice' ) );
 		add_action( 'admin_init', array( $this, 'maybe_dismiss' ) );
 	}
 
+	/**
+	 * Persist the dismissal when the notice's dismiss link is clicked.
+	 */
 	public function maybe_dismiss() {
 		if ( empty( $_GET[ self::DISMISS_PARAM ] ) ) {
 			return;
@@ -44,6 +53,9 @@ class Temso_Cache_Detect {
 		update_user_meta( get_current_user_id(), self::DISMISS_META, 1 );
 	}
 
+	/**
+	 * Render the cache-detected notice for capable, non-dismissed users.
+	 */
 	public function maybe_notice() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;
@@ -80,6 +92,8 @@ class Temso_Cache_Detect {
 	}
 
 	/**
+	 * Detect which known full-page caching plugins are active.
+	 *
 	 * @return string[] Labels of active known caching plugins.
 	 */
 	private function detect() {

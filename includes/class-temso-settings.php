@@ -9,6 +9,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Registers and renders the Settings → Temso AI page.
+ */
 class Temso_Settings {
 
 	const OPTION = 'temso_settings';
@@ -32,6 +35,9 @@ class Temso_Settings {
 		);
 	}
 
+	/**
+	 * Register the admin menu, settings, and plugin-list link.
+	 */
 	public function boot() {
 		add_action( 'admin_menu', array( $this, 'add_page' ) );
 		add_action( 'admin_init', array( $this, 'register' ) );
@@ -42,6 +48,8 @@ class Temso_Settings {
 	}
 
 	/**
+	 * Prepend a Settings link to the plugin's row actions.
+	 *
 	 * @param array $links Existing plugin row action links.
 	 * @return array
 	 */
@@ -56,6 +64,9 @@ class Temso_Settings {
 		return $links;
 	}
 
+	/**
+	 * Add the options page under Settings.
+	 */
 	public function add_page() {
 		add_options_page(
 			__( 'Temso AI', 'temso-ai' ),
@@ -66,6 +77,9 @@ class Temso_Settings {
 		);
 	}
 
+	/**
+	 * Register the settings group and its sanitizer.
+	 */
 	public function register() {
 		register_setting(
 			self::GROUP,
@@ -75,6 +89,8 @@ class Temso_Settings {
 	}
 
 	/**
+	 * Sanitize the submitted settings.
+	 *
 	 * @param mixed $input Raw posted value.
 	 * @return array
 	 */
@@ -92,6 +108,9 @@ class Temso_Settings {
 		);
 	}
 
+	/**
+	 * Render the settings page.
+	 */
 	public function render() {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return;

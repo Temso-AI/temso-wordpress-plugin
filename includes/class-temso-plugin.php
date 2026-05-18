@@ -14,6 +14,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Captures each request and queues it for batched delivery.
+ */
 class Temso_Plugin {
 
 	/**
@@ -23,6 +26,9 @@ class Temso_Plugin {
 	 */
 	private $pending = null;
 
+	/**
+	 * Register the request-capture and finalize hooks.
+	 */
 	public function boot() {
 		add_action( 'init', array( $this, 'capture' ), 1 );
 		add_action( 'shutdown', array( $this, 'finalize' ), PHP_INT_MAX );
@@ -69,8 +75,8 @@ class Temso_Plugin {
 		$status                  = http_response_code();
 		$this->pending['status'] = is_int( $status ) ? $status : 200;
 
-		$buffer = new Temso_Buffer();
-		$due    = $buffer->add( $this->pending );
+		$buffer        = new Temso_Buffer();
+		$due           = $buffer->add( $this->pending );
 		$this->pending = null;
 
 		if ( $due ) {

@@ -13,6 +13,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Option-backed buffer that accumulates events across requests.
+ */
 class Temso_Buffer {
 
 	const EVENTS_OPTION  = 'temso_buffer';

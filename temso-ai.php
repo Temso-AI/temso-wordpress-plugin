@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'TEMSO_VERSION', '0.1.0' ); // x-release-please-version
+define( 'TEMSO_VERSION', '0.1.0' ); // x-release-please-version.
 define( 'TEMSO_FILE', __FILE__ );
 define( 'TEMSO_PATH', plugin_dir_path( __FILE__ ) );
 

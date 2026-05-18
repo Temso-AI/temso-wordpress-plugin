@@ -13,11 +13,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
+/**
+ * Delivers buffered events to the Temso ingest endpoint.
+ */
 class Temso_Dispatcher {
 
 	const LAST_SENT_OPTION = 'temso_last_sent_at';
 
 	/**
+	 * Send a batch of events to the configured ingest endpoint.
+	 *
 	 * @param array $events List of normalized events.
 	 */
 	public function send( array $events ) {
