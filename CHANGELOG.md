@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.3.0...v0.4.0) (2026-05-19)
+
+
+### Features
+
+* make the plugin wordpress.org-submittable ([d1eb08b](https://github.com/Temso-AI/temso-wordpress-plugin/commit/d1eb08bd5b125d2ee410e4a61182b4750ba60f1f))
+
 ## [0.3.0](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.2.0...v0.3.0) (2026-05-19)
 
 
