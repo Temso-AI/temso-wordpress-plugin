@@ -33,13 +33,15 @@ slug. File selection honors `.distignore`.
 ## Cutting a release (and client auto-updates)
 
 `includes/class-temso-updater.php` lets copies installed *outside* wp.org
-update themselves from GitHub releases — but only when the site defines:
+update themselves from GitHub releases. `temso-ai.php` ships with:
 
 ```php
-define( 'TEMSO_GH_REPO', 'temso/temso-wordpress-plugin' );
+define( 'TEMSO_GH_REPO', 'Temso-AI/temso-wordpress-plugin' );
 ```
 
-(in `wp-config.php`). Without it the updater is inert.
+so this works with no per-site setup. To disable it (e.g. a wordpress.org
+build, so WP core's updater stays authoritative), pre-define it empty in
+`wp-config.php`: `define( 'TEMSO_GH_REPO', '' );`.
 
 To release:
 

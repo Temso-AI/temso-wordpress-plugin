@@ -3,8 +3,9 @@
  * GitHub-release update checker for copies installed *outside* the
  * WordPress.org directory.
  *
- * Inert unless `TEMSO_GH_REPO` is defined (e.g. "temso/temso-wordpress-plugin")
- * — the wordpress.org-distributed build never defines it, so WP core's own
+ * `TEMSO_GH_REPO` is defined in temso-ai.php so GitHub-distributed copies
+ * self-update with no manual wp-config.php step. A wordpress.org build can
+ * pre-define it as '' in wp-config.php to keep this inert, so WP core's own
  * updater stays the single source of truth there and the two never collide.
  *
  * Each tagged GitHub release must attach a packaged `temso-ai.zip` whose top

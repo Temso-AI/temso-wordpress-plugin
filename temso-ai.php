@@ -25,6 +25,13 @@ define( 'TEMSO_VERSION', '0.1.0' ); // x-release-please-version.
 define( 'TEMSO_FILE', __FILE__ );
 define( 'TEMSO_PATH', plugin_dir_path( __FILE__ ) );
 
+// GitHub repo this plugin self-updates from (see Temso_Updater). Guarded so a
+// wordpress.org build can pre-define it as '' in wp-config.php to disable the
+// GitHub updater and let WP core's own updater stay the single source.
+if ( ! defined( 'TEMSO_GH_REPO' ) ) {
+	define( 'TEMSO_GH_REPO', 'Temso-AI/temso-wordpress-plugin' );
+}
+
 // Buffer flush thresholds. A tracked request only triggers an HTTP send once
 // the buffer reaches TEMSO_BATCH_MAX_SIZE events or its oldest event is older
 // than TEMSO_BATCH_MAX_AGE seconds — every other request is a fast option
