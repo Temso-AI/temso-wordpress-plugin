@@ -16,7 +16,7 @@ PHPCS_PATHS := $(CURDIR)/vendor/wp-coding-standards/wpcs,$(CURDIR)/vendor/phpcss
 
 .DEFAULT_GOAL := help
 
-.PHONY: help install update lint phpcs phpcbf test test-7.4 test-8.4 build check clean doctor
+.PHONY: help install update lint phpcs phpcbf test test-7.4 test-8.4 build build-wporg check clean doctor
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_.-]+:.*## ' $(MAKEFILE_LIST) \
@@ -46,8 +46,11 @@ test-7.4: ## Run PHPUnit on PHP 7.4
 test-8.4: ## Run PHPUnit on PHP 8.4
 	$(PHP84) vendor/bin/phpunit
 
-build: ## Build the distributable plugin zip
+build: ## Build the distributable plugin zip (GitHub distribution)
 	bash bin/build.sh
+
+build-wporg: ## Build the wordpress.org submission zip (self-updater stripped)
+	bash bin/build.sh --wporg
 
 check: lint phpcs test ## Run the full local suite (lint + phpcs + tests on both PHPs)
 

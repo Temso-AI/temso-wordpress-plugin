@@ -1,12 +1,10 @@
 === Temso AI ===
-Contributors: temso
+Contributors: temsoai
 Tags: analytics, bots, crawlers, ai, logs
 Requires at least: 6.0
-Tested up to: 6.5
+Tested up to: 6.9
 Requires PHP: 7.4
-<!-- x-release-please-start-version -->
 Stable tag: 0.3.0
-<!-- x-release-please-end -->
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -39,6 +37,28 @@ Suggested privacy-policy snippet:
 
 > This site uses Temso to measure automated (bot and AI-crawler) traffic. For each page request, technical metadata (URL, time, browser user agent, referring page, and a one-way hash of your IP address) is sent to Temso. No cookies are set and you are not personally identified. See https://temso.ai/privacy for details.
 
+== Frequently Asked Questions ==
+
+= Do I need a Temso account? =
+
+Yes. The plugin is an interface to the Temso service — create a source under Crawlers → Add source → WordPress in your Temso project to get the Ingest URL and API key.
+
+= Why are my counts lower than my own analytics? =
+
+Requests served from a full-page cache (a caching plugin or a CDN) never reach PHP, so no origin plugin can see them. Temso measures cache misses; expect lower numbers than total traffic.
+
+= What data leaves my site? =
+
+Per request: timestamp, URL, HTTP method, response status, user agent, referer, and the visitor IP. The IP is sent over TLS and hashed by Temso before storage — never retained raw. No cookies, no JavaScript, no client-side tracking. See the Privacy section.
+
+= Does it slow down my site? =
+
+No. Delivery is batched and non-blocking — the visitor response is never delayed by the upload.
+
+= Does it work on WordPress Multisite? =
+
+Yes. Activate and connect it per site; each site uses its own Ingest URL and key.
+
 == Screenshots ==
 
 1. The Settings → Temso page: paste your Ingest URL and API key.
@@ -46,5 +66,14 @@ Suggested privacy-policy snippet:
 
 == Changelog ==
 
-= 0.1.0 =
-* Initial release: front-end request capture with batched, non-blocking delivery to Temso.
+= 0.3.0 =
+* Captures every server-side request (front-end, wp-admin, REST, AJAX, login, xmlrpc) — full parity with the Temso CDN connectors.
+* Security hardening: stricter request-header sanitization, HTTPS-only ingest endpoint, bounded delivery buffer.
+
+= 0.2.0 =
+* Initial public release: request capture with batched, non-blocking background delivery, settings screen, and multisite support.
+
+== Upgrade Notice ==
+
+= 0.3.0 =
+Full server-side request coverage and security hardening. Recommended for all users.

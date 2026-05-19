@@ -6,8 +6,7 @@
     ".": {
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        { "type": "generic", "path": "temso-ai.php" },
-        { "type": "generic", "path": "readme.txt" }
+        { "type": "generic", "path": "temso-ai.php" }
       ]
     }
   }

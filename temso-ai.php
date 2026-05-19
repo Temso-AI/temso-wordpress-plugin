@@ -25,11 +25,13 @@ define( 'TEMSO_VERSION', '0.3.0' ); // x-release-please-version.
 define( 'TEMSO_FILE', __FILE__ );
 define( 'TEMSO_PATH', plugin_dir_path( __FILE__ ) );
 
-// GitHub repo this plugin self-updates from (see Temso_Updater). Guarded so a
-// wordpress.org build can pre-define it as '' in wp-config.php to disable the
-// GitHub updater and let WP core's own updater stay the single source.
-if ( ! defined( 'TEMSO_GH_REPO' ) ) {
-	define( 'TEMSO_GH_REPO', 'Temso-AI/temso-wordpress-plugin' );
+// GitHub-distributed builds ship includes/github-distribution.php, which
+// defines TEMSO_GH_REPO and so enables the Temso_Updater self-updater. The
+// WordPress.org package omits that file, leaving TEMSO_GH_REPO undefined so
+// the updater stays inert and WP core is the single update source (required
+// by the .org guidelines).
+if ( file_exists( TEMSO_PATH . 'includes/github-distribution.php' ) ) {
+	require_once TEMSO_PATH . 'includes/github-distribution.php';
 }
 
 // Buffer flush thresholds. A tracked request only triggers an HTTP send once
@@ -47,7 +49,11 @@ require_once TEMSO_PATH . 'includes/class-temso-buffer.php';
 require_once TEMSO_PATH . 'includes/class-temso-dispatcher.php';
 require_once TEMSO_PATH . 'includes/class-temso-settings.php';
 require_once TEMSO_PATH . 'includes/class-temso-cache-detect.php';
-require_once TEMSO_PATH . 'includes/class-temso-updater.php';
+// Excluded from the wordpress.org build (see bin/build.sh --wporg) so that
+// build ships no self-update code at all; guarded so its absence is harmless.
+if ( file_exists( TEMSO_PATH . 'includes/class-temso-updater.php' ) ) {
+	require_once TEMSO_PATH . 'includes/class-temso-updater.php';
+}
 require_once TEMSO_PATH . 'includes/class-temso-plugin.php';
 
 register_deactivation_hook(
@@ -61,7 +67,9 @@ add_action(
 	'plugins_loaded',
 	static function () {
 		( new Temso_Plugin() )->boot();
-		( new Temso_Updater() )->boot();
+		if ( class_exists( 'Temso_Updater' ) ) {
+			( new Temso_Updater() )->boot();
+		}
 		if ( is_admin() ) {
 			( new Temso_Settings() )->boot();
 			( new Temso_Cache_Detect() )->boot();
