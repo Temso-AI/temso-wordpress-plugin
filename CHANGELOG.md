@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.4](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.3...v0.4.4) (2026-05-21)
+
+
+### Bug Fixes
+
+* add Test connection button to verify Ingest URL and API key ([085b16f](https://github.com/Temso-AI/temso-wordpress-plugin/commit/085b16f3aa928b8ddba5e15290789f645ae6f97c))
+* add Test connection button to verify Ingest URL and API key ([9f3c009](https://github.com/Temso-AI/temso-wordpress-plugin/commit/9f3c0096160fdf8c940ae4a9a8b336bb2a0253ae))
+
 ## [0.4.3](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.2...v0.4.3) (2026-05-21)
 
 
