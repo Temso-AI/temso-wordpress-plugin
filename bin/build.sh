@@ -40,7 +40,10 @@ BUILD_DIR="$ROOT/build"
 STAGE="$BUILD_DIR/$SLUG"
 DIST="$ROOT/dist"
 
-rm -rf "$BUILD_DIR" "$DIST"
+# Only nuke the staging dir; leave dist/ in place so successive runs
+# (e.g. default build then --wporg build in CI) accumulate side by side.
+# Each mode's own output is deleted explicitly just before it's written.
+rm -rf "$BUILD_DIR"
 mkdir -p "$STAGE" "$DIST"
 
 WPORG_EXCLUDE=()
@@ -68,6 +71,8 @@ rm -f "$STAGE/readme.txt.bak"
 
 if [[ "$WPORG" -eq 1 ]]; then
 	WPORG_ZIP="$DIST/$SLUG-$VERSION-wporg.zip"
+	# zip -u would merge into an existing archive; we want a clean rebuild.
+	rm -f "$WPORG_ZIP"
 	( cd "$BUILD_DIR" && zip -rqX "$WPORG_ZIP" "$SLUG" )
 	echo "Built (wordpress.org submission):"
 	echo "  $WPORG_ZIP"
@@ -75,6 +80,7 @@ if [[ "$WPORG" -eq 1 ]]; then
 fi
 
 VERSIONED="$DIST/$SLUG-$VERSION.zip"
+rm -f "$VERSIONED" "$DIST/$SLUG.zip"
 ( cd "$BUILD_DIR" && zip -rqX "$VERSIONED" "$SLUG" )
 cp "$VERSIONED" "$DIST/$SLUG.zip"
 

@@ -160,11 +160,17 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.tag_name }}
 
-      - name: Build plugin zip
+      - name: Build GitHub-distribution zip
         run: bash bin/build.sh
+
+      - name: Build WordPress.org submission zip
+        run: bash bin/build.sh --wporg
 
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+        # `dist/temso-ai-*.zip` matches both the versioned default zip and the
+        # `-wporg.zip` produced above; `temso-ai.zip` is the stable-named alias
+        # the GitHub-distribution updater downloads.
         run: gh release upload "$TAG_NAME" dist/temso-ai.zip dist/temso-ai-*.zip --clobber
