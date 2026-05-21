@@ -14,8 +14,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Temso_Settings {
 
-	const OPTION = 'temso_settings';
-	const GROUP  = 'temso_settings_group';
+	const OPTION              = 'temso_settings';
+	const GROUP               = 'temso_settings_group';
+	const AJAX_VERIFY_ACTION  = 'temso_verify';
+	const SETTINGS_PAGE_HOOK  = 'settings_page_temso-ai';
 
 	/**
 	 * Current settings, with defaults applied.
@@ -41,9 +43,125 @@ class Temso_Settings {
 	public function boot() {
 		add_action( 'admin_menu', array( $this, 'add_page' ) );
 		add_action( 'admin_init', array( $this, 'register' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+		add_action( 'wp_ajax_' . self::AJAX_VERIFY_ACTION, array( $this, 'ajax_verify' ) );
 		add_filter(
 			'plugin_action_links_' . plugin_basename( TEMSO_FILE ),
 			array( $this, 'action_links' )
+		);
+	}
+
+	/**
+	 * Enqueue the verify-button script — only on the Temso settings page.
+	 *
+	 * @param string $hook Admin page hook suffix passed by WordPress.
+	 */
+	public function enqueue_assets( $hook ) {
+		if ( self::SETTINGS_PAGE_HOOK !== $hook ) {
+			return;
+		}
+
+		wp_enqueue_script(
+			'temso-verify',
+			plugins_url( 'assets/js/verify.js', TEMSO_FILE ),
+			array(),
+			TEMSO_VERSION,
+			true
+		);
+		wp_localize_script(
+			'temso-verify',
+			'temsoVerify',
+			array(
+				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+				'action'  => self::AJAX_VERIFY_ACTION,
+				'nonce'   => wp_create_nonce( self::AJAX_VERIFY_ACTION ),
+				'i18n'    => array(
+					'testing'      => __( 'Testing…', 'temso-ai' ),
+					'success'      => __( 'Connected. Credentials verified.', 'temso-ai' ),
+					'missing'      => __( 'Enter both an Ingest URL and an API key first.', 'temso-ai' ),
+					'unauthorized' => __( 'API key not recognized.', 'temso-ai' ),
+					'forbidden'    => __( 'API key lacks the required scope.', 'temso-ai' ),
+					'revoked'      => __( 'Source revoked — generate a new one in Temso.', 'temso-ai' ),
+					'not_found'    => __( 'The key is valid but does not own that source.', 'temso-ai' ),
+					'network'      => __( 'Could not reach Temso. Check the URL and your server connectivity.', 'temso-ai' ),
+					'unknown'      => __( 'Unexpected error. Check the URL and key.', 'temso-ai' ),
+				),
+			)
+		);
+	}
+
+	/**
+	 * AJAX handler for the "Test connection" button.
+	 *
+	 * Accepts the URL/key from the form (not from saved settings) so the user
+	 * can verify a freshly pasted pair before saving. Returns a structured
+	 * `code` the JS maps to a translated message.
+	 */
+	public function ajax_verify() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'code' => 'FORBIDDEN' ), 403 );
+		}
+		check_ajax_referer( self::AJAX_VERIFY_ACTION, 'nonce' );
+
+		$url = isset( $_POST['ingest_url'] )
+			? esc_url_raw( wp_unslash( $_POST['ingest_url'] ), array( 'https' ) )
+			: '';
+		$key = isset( $_POST['api_key'] )
+			? sanitize_text_field( wp_unslash( $_POST['api_key'] ) )
+			: '';
+
+		if ( '' === $url || '' === $key ) {
+			wp_send_json_error( array( 'code' => 'missing' ) );
+		}
+
+		$result = self::verify_credentials( $url, $key );
+		if ( $result['ok'] ) {
+			wp_send_json_success( $result );
+		}
+		wp_send_json_error( $result );
+	}
+
+	/**
+	 * Call the Temso `/verify` endpoint and return a structured result.
+	 *
+	 * Pure helper — no WP options or hooks touched, so it can also be reused
+	 * later (e.g. to surface a failure notice from the dispatcher path).
+	 *
+	 * @param string $ingest_url Configured ingest URL.
+	 * @param string $api_key    Configured API key.
+	 * @return array{ok:bool,code?:string,status?:int}
+	 */
+	public static function verify_credentials( $ingest_url, $api_key ) {
+		$verify_url = rtrim( $ingest_url, '/' ) . '/verify';
+
+		$response = wp_remote_post(
+			$verify_url,
+			array(
+				'timeout'   => 10,
+				'sslverify' => true,
+				'headers'   => array(
+					'Authorization' => 'Bearer ' . $api_key,
+					'Accept'        => 'application/json',
+				),
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return array( 'ok' => false, 'code' => 'network' );
+		}
+
+		$status = (int) wp_remote_retrieve_response_code( $response );
+		if ( 200 === $status ) {
+			return array( 'ok' => true, 'status' => 200 );
+		}
+
+		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+		$code = is_array( $body ) && isset( $body['code'] ) ? (string) $body['code'] : 'unknown';
+
+		return array(
+			'ok'     => false,
+			'status' => $status,
+			'code'   => $code,
 		);
 	}
 
@@ -162,6 +280,18 @@ class Temso_Settings {
 								name="<?php echo esc_attr( self::OPTION ); ?>[api_key]"
 								value="<?php echo esc_attr( $settings['api_key'] ); ?>"
 								autocomplete="off" />
+						</td>
+					</tr>
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Test connection', 'temso-ai' ); ?></th>
+						<td>
+							<button type="button" class="button" id="temso-verify-btn">
+								<?php esc_html_e( 'Test now', 'temso-ai' ); ?>
+							</button>
+							<span id="temso-verify-result" aria-live="polite" style="margin-left:8px;"></span>
+							<p class="description">
+								<?php esc_html_e( 'Calls Temso to confirm the URL and key are valid. Uses the values currently in the form — no need to save first.', 'temso-ai' ); ?>
+							</p>
 						</td>
 					</tr>
 					<tr>
