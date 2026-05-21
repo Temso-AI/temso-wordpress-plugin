@@ -2,7 +2,7 @@
 Contributors: temsoai
 Tags: analytics, bots, crawlers, ai, logs
 Requires at least: 6.0
-Tested up to: 6.8
+Tested up to: 7.0
 Requires PHP: 7.4
 Stable tag: 0.4.1
 License: GPLv2 or later
