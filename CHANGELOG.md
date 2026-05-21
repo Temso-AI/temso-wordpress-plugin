@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.5](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.4...v0.4.5) (2026-05-21)
+
+
+### Bug Fixes
+
+* point Plugin URI at the GitHub repo to differ from Author URI ([b62ecfd](https://github.com/Temso-AI/temso-wordpress-plugin/commit/b62ecfdce99ec9cf74074f6f50d3456722814209))
+
 ## [0.4.4](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.3...v0.4.4) (2026-05-21)
 
 
