@@ -14,11 +14,11 @@ if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) {
 require_once __DIR__ . '/includes/class-temso-buffer.php';
 require_once __DIR__ . '/includes/class-temso-dispatcher.php';
 require_once __DIR__ . '/includes/class-temso-settings.php';
-// Absent in the wordpress.org build; that build never sets its transient, so
-// there is nothing to clean up there.
+// temso:wporg-exclude-start
 if ( file_exists( __DIR__ . '/includes/class-temso-updater.php' ) ) {
 	require_once __DIR__ . '/includes/class-temso-updater.php';
 }
+// temso:wporg-exclude-end
 
 $temso_options = array(
 	Temso_Settings::OPTION,
@@ -31,9 +31,11 @@ $temso_purge = static function () use ( $temso_options ) {
 	foreach ( $temso_options as $temso_option ) {
 		delete_option( $temso_option );
 	}
+	// temso:wporg-exclude-start
 	if ( class_exists( 'Temso_Updater' ) ) {
 		delete_site_transient( Temso_Updater::CACHE_KEY );
 	}
+	// temso:wporg-exclude-end
 };
 
 $temso_purge();

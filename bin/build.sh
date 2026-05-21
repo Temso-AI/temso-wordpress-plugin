@@ -70,6 +70,15 @@ sed -i.bak -E "s/^Stable tag:.*/Stable tag: $VERSION/" "$STAGE/readme.txt"
 rm -f "$STAGE/readme.txt.bak"
 
 if [[ "$WPORG" -eq 1 ]]; then
+	# Strip blocks wrapped in `// temso:wporg-exclude-start` ...
+	# `// temso:wporg-exclude-end` markers from staged PHP so the .org
+	# package has zero textual references to the self-updater — plugin-check
+	# pattern-matches on the strings even when the runtime branches are inert.
+	find "$STAGE" -type f -name '*.php' -exec \
+		sed -i '/temso:wporg-exclude-start/,/temso:wporg-exclude-end/d' {} +
+fi
+
+if [[ "$WPORG" -eq 1 ]]; then
 	WPORG_ZIP="$DIST/$SLUG-$VERSION-wporg.zip"
 	# zip -u would merge into an existing archive; we want a clean rebuild.
 	rm -f "$WPORG_ZIP"
