@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.2...v0.4.3) (2026-05-21)
+
+
+### Bug Fixes
+
+* bump Tested up to 7.0 to match current WP release ([8c0b580](https://github.com/Temso-AI/temso-wordpress-plugin/commit/8c0b580886afc81f2cdcdb7345c2a4d88305e261))
+
 ## [0.4.2](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.1...v0.4.2) (2026-05-21)
 
 
