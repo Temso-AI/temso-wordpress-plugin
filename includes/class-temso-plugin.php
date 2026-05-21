@@ -3,9 +3,8 @@
  * Request capture.
  *
  * Records metadata for every HTTP request WordPress serves and queues it for
- * batched delivery to Temso (mirrors the Cloudflare connector — only WP-CLI
- * is skipped). The final HTTP status is only known at `shutdown`, so the
- * event is finalized there.
+ * batched delivery to Temso (only WP-CLI is skipped). The final HTTP status is
+ * only known at `shutdown`, so the event is finalized there.
  *
  * @package Temso
  */
@@ -86,11 +85,9 @@ class Temso_Plugin {
 
 	/**
 	 * Capture every request WordPress serves over HTTP — front-end, wp-admin,
-	 * REST, AJAX, login, xmlrpc, cron pings — to mirror the Cloudflare edge
-	 * connector, which sends all zone traffic. Temso decides server-side what
-	 * to retain (bot classification) and hashes the IP; nothing is filtered
-	 * here. Only genuine non-HTTP execution (WP-CLI) is skipped, since the
-	 * edge never sees that either.
+	 * REST, AJAX, login, xmlrpc, cron pings. Temso decides server-side what to
+	 * retain (bot classification) and hashes the IP; nothing is filtered here.
+	 * Only genuine non-HTTP execution (WP-CLI) is skipped.
 	 *
 	 * @return bool
 	 */

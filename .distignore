@@ -26,5 +26,6 @@
 /CONTRIBUTING.md
 /build
 /dist
+/assets/README.md
 *.zip
 *.log

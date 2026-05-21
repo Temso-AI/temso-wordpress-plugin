@@ -86,6 +86,8 @@ jobs:
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       # Opens/maintains a "release" PR that bumps the version everywhere and
       # updates CHANGELOG.md from Conventional Commits. Merging that PR is what
@@ -100,6 +102,48 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  sync-wp-readme:
+    name: Sync readme.txt to release PR
+    needs: release-please
+    # Run whenever release-please has an open release PR (newly created OR
+    # already open). The WP readme `Stable tag:` header can't carry release-
+    # please's in-file annotations, and release-please doesn't know about the
+    # `== Changelog ==` block, so we patch both here and push the result onto
+    # the same PR branch.
+    if: needs.release-please.outputs.pr != '' && needs.release-please.outputs.pr != 'null'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # `pr` is JSON emitted by release-please-action (not user input), but
+      # consume it via env to keep the run-shell free of expression interpolation.
+      - name: Resolve release-please PR branch
+        id: branch
+        env:
+          PR_JSON: ${{ needs.release-please.outputs.pr }}
+        run: echo "name=$(echo "$PR_JSON" | jq -r '.headBranchName')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.branch.outputs.name }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Sync readme.txt with bumped version + changelog
+        run: bash bin/sync-wp-readme.sh
+
+      - name: Commit and push if changed
+        run: |
+          if git diff --quiet readme.txt; then
+            echo "readme.txt already in sync"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add readme.txt
+          git commit -m "chore: sync readme.txt (Stable tag + changelog)"
+          git push
 
   attach-assets:
     name: Build & attach plugin zip

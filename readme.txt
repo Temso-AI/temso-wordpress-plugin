@@ -2,9 +2,9 @@
 Contributors: temsoai
 Tags: analytics, bots, crawlers, ai, logs
 Requires at least: 6.0
-Tested up to: 6.9
+Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 0.3.0
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -12,9 +12,9 @@ Stream front-end request logs from your WordPress origin to Temso so AI-crawler 
 
 == Description ==
 
-Temso captures every request your WordPress origin serves over HTTP and sends it to Temso in the background. Unlike CDN-based setups, it needs no DNS, Worker, or log-drain configuration — install, paste two values, done.
+Temso captures every request your WordPress origin serves over HTTP and sends it to Temso in the background. No DNS changes, no extra infrastructure — install, paste two values, done.
 
-* Captures all server-side requests — front-end, wp-admin, REST, AJAX, login, xmlrpc — the same coverage as the Temso Cloudflare/Vercel connectors. Bot classification happens in Temso.
+* Captures all server-side requests — front-end, wp-admin, REST, AJAX, login, xmlrpc. Bot classification happens in Temso.
 * Non-blocking, batched delivery — adds no perceptible latency to your pages.
 * No cookies, no JavaScript, no client-side tracking.
 * Visitor IPs are sent over TLS and hashed in Temso before storage; raw IPs are never retained.
@@ -59,21 +59,22 @@ No. Delivery is batched and non-blocking — the visitor response is never delay
 
 Yes. Activate and connect it per site; each site uses its own Ingest URL and key.
 
-== Screenshots ==
-
-1. The Settings → Temso page: paste your Ingest URL and API key.
-2. Captured WordPress traffic appearing in the Temso crawler dashboard.
-
 == Changelog ==
 
+= 0.4.0 =
+* Packaging: WordPress.org submission readiness — plugin headers, build pipeline, and uninstall flow finalized.
+
 = 0.3.0 =
-* Captures every server-side request (front-end, wp-admin, REST, AJAX, login, xmlrpc) — full parity with the Temso CDN connectors.
+* Captures every server-side request (front-end, wp-admin, REST, AJAX, login, xmlrpc).
 * Security hardening: stricter request-header sanitization, HTTPS-only ingest endpoint, bounded delivery buffer.
 
 = 0.2.0 =
 * Initial public release: request capture with batched, non-blocking background delivery, settings screen, and multisite support.
 
 == Upgrade Notice ==
+
+= 0.4.0 =
+Packaging refresh for the WordPress.org launch. No behavior change.
 
 = 0.3.0 =
 Full server-side request coverage and security hardening. Recommended for all users.
