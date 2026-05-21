@@ -31,11 +31,7 @@ Requests served from full-page cache never reach PHP and therefore can't be capt
 
 == Privacy ==
 
-This plugin sends the following per front-end request to the Temso API endpoint you configure: timestamp, request URL, HTTP method, response status, user agent, referer, and the visitor IP address. The IP address is transmitted over TLS and hashed by Temso before storage — it is never stored in raw form, and the plugin sets no cookies and adds no client-side tracking.
-
-Suggested privacy-policy snippet:
-
-> This site uses Temso to measure automated (bot and AI-crawler) traffic. For each page request, technical metadata (URL, time, browser user agent, referring page, and a one-way hash of your IP address) is sent to Temso. No cookies are set and you are not personally identified. See https://temso.ai/privacy for details.
+This plugin sends the following per HTTP request that WordPress serves (front-end, wp-admin, REST, AJAX, login, xmlrpc) to the Temso API endpoint you configure: timestamp, request URL, HTTP method, response status, user agent, referer, and the visitor IP address. The IP address is transmitted over TLS and hashed by Temso before storage — it is never stored in raw form, and the plugin sets no cookies and adds no client-side tracking.
 
 == Frequently Asked Questions ==
 
