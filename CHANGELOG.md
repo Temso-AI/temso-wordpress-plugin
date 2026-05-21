@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.0...v0.4.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* ready readme.txt for .org review and auto-sync it from release-please ([6643971](https://github.com/Temso-AI/temso-wordpress-plugin/commit/66439718e74906cf7b27fda4368dabee937a8db4))
+
 ## [0.4.0](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.3.0...v0.4.0) (2026-05-19)
 
 
