@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.2](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.1...v0.4.2) (2026-05-21)
+
+
+### Bug Fixes
+
+* end wp-org strip markers with `.` for WPCS InlineComment rule ([d12b5ec](https://github.com/Temso-AI/temso-wordpress-plugin/commit/d12b5ec06623af682606080bb758f1e7bf1c5d40))
+* strip self-updater references from the wordpress.org build ([13e15b7](https://github.com/Temso-AI/temso-wordpress-plugin/commit/13e15b79de3bc3e6a69a94b99a38f33146cf35d7))
+
 ## [0.4.1](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.0...v0.4.1) (2026-05-21)
 
 
