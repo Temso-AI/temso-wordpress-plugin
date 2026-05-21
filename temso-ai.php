@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       Temso AI
- * Plugin URI:        https://temso.ai
+ * Plugin URI:        https://github.com/Temso-AI/temso-wordpress-plugin
  * Description:        Captures front-end requests at your WordPress origin and streams them to Temso so AI-crawler and bot traffic shows up in your Temso dashboard. No CDN, theme, or code changes.
  * x-release-please-start-version
  * Version:           0.4.3
