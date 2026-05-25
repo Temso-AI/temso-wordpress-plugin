@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.6](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.5...v0.4.6) (2026-05-25)
+
+
+### Bug Fixes
+
+* add sanitize for the key input in the admin panel ([8f33121](https://github.com/Temso-AI/temso-wordpress-plugin/commit/8f3312135e4c2201dd9f964f713413969d73451d))
+
 ## [0.4.5](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.4...v0.4.5) (2026-05-21)
 
 
