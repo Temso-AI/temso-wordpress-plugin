@@ -20,6 +20,8 @@ Temso captures every request your WordPress origin serves over HTTP and sends it
 * Visitor IPs are sent over TLS and hashed in Temso before storage; raw IPs are never retained.
 * WordPress Multisite supported (activate and connect per site).
 
+Learn more at [temso.ai](https://temso.ai/).
+
 Requests served from full-page cache never reach PHP and therefore can't be captured by any origin plugin — this is expected and matches the documented CDN-cache limitation.
 
 == Installation ==

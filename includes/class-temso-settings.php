@@ -107,7 +107,7 @@ class Temso_Settings {
 			? esc_url_raw( wp_unslash( $_POST['ingest_url'] ), array( 'https' ) )
 			: '';
 		$key = isset( $_POST['api_key'] )
-			? sanitize_text_field( wp_unslash( $_POST['api_key'] ) )
+			? sanitize_key( wp_unslash( $_POST['api_key'] ) )
 			: '';
 
 		if ( '' === $url || '' === $key ) {
@@ -225,10 +225,16 @@ class Temso_Settings {
 		// plain-http endpoint would leak it in cleartext.
 		$url = isset( $input['ingest_url'] ) ? esc_url_raw( trim( (string) $input['ingest_url'] ), array( 'https' ) ) : '';
 
+		// Temso keys are `tms_<lowercase-hex>`; sanitize_key() keeps exactly
+		// that character set, so it preserves any valid key while stripping
+		// stray whitespace, quotes, or control bytes that would corrupt the
+		// Authorization header. sanitize_text_field() must not be used here:
+		// it collapses whitespace and strips `%xx` octets, both of which can
+		// silently mangle a secret.
 		return array(
 			'enabled'    => ! empty( $input['enabled'] ),
 			'ingest_url' => $url,
-			'api_key'    => isset( $input['api_key'] ) ? sanitize_text_field( $input['api_key'] ) : '',
+			'api_key'    => isset( $input['api_key'] ) ? sanitize_key( $input['api_key'] ) : '',
 		);
 	}
 
