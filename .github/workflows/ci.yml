@@ -204,6 +204,10 @@ jobs:
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          # Numeric version (no leading v) for the SVN tag dir. Without this the
+          # deploy action falls back to GITHUB_REF (here refs/heads/main, since
+          # we dispatch from a branch) and builds a bogus tags/refs/heads/... path.
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v5
         with:
@@ -227,6 +231,9 @@ jobs:
           SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
           SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
           SLUG: temso-ai
+          # Explicit version -> SVN tags/<version>. Required because we dispatch
+          # from a branch, so the action's GITHUB_REF fallback is wrong.
+          VERSION: ${{ steps.ref.outputs.version }}
           # Deploy the pre-stripped staging tree, not a fresh source checkout, so
           # the self-updater files/markers stay out of the .org package.
           BUILD_DIR: build/temso-ai
