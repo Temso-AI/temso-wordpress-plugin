@@ -4,7 +4,7 @@ Tags: analytics, bots, crawlers, ai, logs
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.0.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -58,6 +58,9 @@ No. Delivery is batched and non-blocking — the visitor response is never delay
 Yes. Activate and connect it per site; each site uses its own Ingest URL and key.
 
 == Changelog ==
+
+= 1.0.1 =
+* Fix: fix wordpress deploy
 
 = 1.0.0 =
 * Fix: enforce release
