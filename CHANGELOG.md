@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.0](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.6...v1.0.0) (2026-06-10)
+
+
+### Bug Fixes
+
+* enforce release ([aae1aa1](https://github.com/Temso-AI/temso-wordpress-plugin/commit/aae1aa17f26231db8184bc44e5dfb8059edba1cc))
+
+
+### Continuous Integration
+
+* add manual WordPress.org SVN deploy pipeline ([3642d76](https://github.com/Temso-AI/temso-wordpress-plugin/commit/3642d76f6ccf72a47842da4c84b0aa1c12b228c8))
+
 ## [0.4.6](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.5...v0.4.6) (2026-05-25)
 
 
