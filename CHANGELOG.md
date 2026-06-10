@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v1.0.0...v1.0.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* fix wordpress deploy ([290487c](https://github.com/Temso-AI/temso-wordpress-plugin/commit/290487c8185323f263eb5f0e38e8847f123b0ef5))
+
 ## [1.0.0](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v0.4.6...v1.0.0) (2026-06-10)
 
 
