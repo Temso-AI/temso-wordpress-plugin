@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to promote to WordPress.org (e.g. v1.0.0). Must be an existing vX.Y.Z release tag.'
+        required: true
 
 permissions:
   contents: read
@@ -174,3 +179,56 @@ jobs:
         # `-wporg.zip` produced above; `temso-ai.zip` is the stable-named alias
         # the GitHub-distribution updater downloads.
         run: gh release upload "$TAG_NAME" dist/temso-ai.zip dist/temso-ai-*.zip --clobber
+
+  deploy-wporg:
+    name: Deploy to WordPress.org SVN
+    # Manual only. WordPress.org discourages a stream of tiny SVN commits, so
+    # promoting to .org is a deliberate step (Actions -> this workflow -> Run
+    # workflow -> pick a tag), fully decoupled from the GitHub release flow.
+    # Ship to git-access users via release-please as often as you like; promote
+    # a tested tag to .org here when it's ready.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      # The dispatch input is attacker-controllable in theory (only repo writers
+      # can trigger it, but defense in depth): validate it to a version tag shape
+      # before it ever reaches `actions/checkout` ref, to foreclose ref injection.
+      - name: Validate tag to deploy
+        id: ref
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$DISPATCH_TAG"
+          if [[ ! "$TAG" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing to deploy ref '$TAG': not a vX.Y.Z version tag." >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.ref.outputs.tag }}
+
+      # Stage the wordpress.org package (self-updater stripped) into build/temso-ai.
+      # build.sh leaves that staging dir in place, so it becomes BUILD_DIR below.
+      - name: Build WordPress.org package
+        run: bash bin/build.sh --wporg
+
+      # The deploy action mirrors the whole ASSETS_DIR into SVN /assets, so stage
+      # a copy without the internal README.md (it's docs, not a listing image).
+      - name: Stage directory assets (drop internal README)
+        run: |
+          mkdir -p build/wporg-assets
+          rsync -a --exclude='README.md' .wordpress-org/ build/wporg-assets/
+
+      - name: Deploy to WordPress.org
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        env:
+          SVN_USERNAME: ${{ secrets.SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.SVN_PASSWORD }}
+          SLUG: temso-ai
+          # Deploy the pre-stripped staging tree, not a fresh source checkout, so
+          # the self-updater files/markers stay out of the .org package.
+          BUILD_DIR: build/temso-ai
+          # Directory-listing images (icon/banner/screenshots) -> SVN /assets.
+          ASSETS_DIR: build/wporg-assets

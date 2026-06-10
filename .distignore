@@ -27,5 +27,7 @@
 /build
 /dist
 /assets/README.md
+/.phpunit.result.cache
+/.phpcs.cache
 *.zip
 *.log
