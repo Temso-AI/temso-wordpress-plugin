@@ -20,6 +20,8 @@ Temso captures every request your WordPress origin serves over HTTP and sends it
 * Visitor IPs are sent over TLS and hashed in Temso before storage; raw IPs are never retained.
 * WordPress Multisite supported (activate and connect per site).
 
+**Publishing (optional).** Temso can also publish content back to this site. You enable it from Temso: open Settings → Integrations → WordPress, generate a one-time setup link, and paste it into **Settings → Temso AI → Publishing** here. The plugin and Temso exchange a publish shared secret automatically — you never copy a secret by hand. Once connected, the plugin accepts signed, server-to-server requests from Temso and creates or updates WordPress posts — writing Yoast and Rank Math SEO metadata too when those plugins are installed. Publishing is authenticated by an HMAC signature over each request, is completely independent of request tracking and the ingest API key, and stays disabled until you connect it. The publish shared secret is stored only on this site.
+
 Learn more at [temso.ai](https://temso.ai/).
 
 Requests served from full-page cache never reach PHP and therefore can't be captured by any origin plugin — this is expected and matches the documented CDN-cache limitation.
@@ -31,9 +33,13 @@ Requests served from full-page cache never reach PHP and therefore can't be capt
 3. Paste the **Ingest URL** and **API key** from your Temso project (Crawlers → Add source → WordPress).
 4. Make sure **Tracking** is enabled and save.
 
+To enable publishing (optional): in Temso open **Settings → Integrations → WordPress**, generate a one-time setup link, then paste it into the **Publishing** section of **Settings → Temso** and click **Connect publishing**. This is separate from traffic ingest — the ingest API key is never used for publishing.
+
 == Privacy ==
 
 This plugin sends the following per HTTP request that WordPress serves (front-end, wp-admin, REST, AJAX, login, xmlrpc) to the Temso API endpoint you configure: timestamp, request URL, HTTP method, response status, user agent, referer, and the visitor IP address. The IP address is transmitted over TLS and hashed by Temso before storage — it is never stored in raw form, and the plugin sets no cookies and adds no client-side tracking.
+
+When publishing is configured, the plugin also receives data from Temso in the inbound direction: the article title, HTML body, slug, and SEO metadata (meta title, meta description, canonical URL) arrive in signed requests from Temso and are stored as WordPress post content and post meta on this site.
 
 == Frequently Asked Questions ==
 

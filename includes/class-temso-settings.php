@@ -14,15 +14,28 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Temso_Settings {
 
-	const OPTION             = 'temso_settings';
-	const GROUP              = 'temso_settings_group';
-	const AJAX_VERIFY_ACTION = 'temso_verify';
-	const SETTINGS_PAGE_HOOK = 'settings_page_temso-ai';
+	const OPTION                         = 'temso_settings';
+	const GROUP                          = 'temso_settings_group';
+	const AJAX_VERIFY_ACTION             = 'temso_verify';
+	const AJAX_CONNECT_PUBLISHING_ACTION = 'temso_connect_publishing';
+	const SETTINGS_PAGE_HOOK             = 'settings_page_temso-ai';
+
+	/**
+	 * Production Temso endpoint that claims a publishing setup token.
+	 *
+	 * Overridable with the TEMSO_PUBLISHING_CLAIM_URL constant or the
+	 * `temso_publishing_claim_url` filter for staging or self-hosted Temso —
+	 * see claim_url(). The shared secret is POSTed here, so the default is a
+	 * fixed Temso-owned host unless a pasted setup link carries another
+	 * hard-allowlisted Temso endpoint.
+	 */
+	const DEFAULT_CLAIM_URL     = 'https://api.temso.ai/v1/integrations/wordpress/setup-claim';
+	const DEVELOPMENT_CLAIM_URL = 'https://api.development.temso.ai/v1/integrations/wordpress/setup-claim';
 
 	/**
 	 * Current settings, with defaults applied.
 	 *
-	 * @return array{enabled:bool,ingest_url:string,api_key:string}
+	 * @return array{enabled:bool,ingest_url:string,api_key:string,publish_secret:string,publishing_connected_at:int,publishing_site_url:string,publishing_rest_base_url:string}
 	 */
 	public static function get() {
 		$saved = get_option( self::OPTION, array() );
@@ -31,9 +44,13 @@ class Temso_Settings {
 		}
 
 		return array(
-			'enabled'    => ! empty( $saved['enabled'] ),
-			'ingest_url' => isset( $saved['ingest_url'] ) ? (string) $saved['ingest_url'] : '',
-			'api_key'    => isset( $saved['api_key'] ) ? (string) $saved['api_key'] : '',
+			'enabled'                  => ! empty( $saved['enabled'] ),
+			'ingest_url'               => isset( $saved['ingest_url'] ) ? (string) $saved['ingest_url'] : '',
+			'api_key'                  => isset( $saved['api_key'] ) ? (string) $saved['api_key'] : '',
+			'publish_secret'           => isset( $saved['publish_secret'] ) ? (string) $saved['publish_secret'] : '',
+			'publishing_connected_at'  => isset( $saved['publishing_connected_at'] ) ? (int) $saved['publishing_connected_at'] : 0,
+			'publishing_site_url'      => isset( $saved['publishing_site_url'] ) ? (string) $saved['publishing_site_url'] : '',
+			'publishing_rest_base_url' => isset( $saved['publishing_rest_base_url'] ) ? (string) $saved['publishing_rest_base_url'] : '',
 		);
 	}
 
@@ -45,6 +62,10 @@ class Temso_Settings {
 		add_action( 'admin_init', array( $this, 'register' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_action( 'wp_ajax_' . self::AJAX_VERIFY_ACTION, array( $this, 'ajax_verify' ) );
+		add_action(
+			'wp_ajax_' . self::AJAX_CONNECT_PUBLISHING_ACTION,
+			array( $this, 'ajax_connect_publishing' )
+		);
 		add_filter(
 			'plugin_action_links_' . plugin_basename( TEMSO_FILE ),
 			array( $this, 'action_links' )
@@ -85,6 +106,33 @@ class Temso_Settings {
 					'not_found'    => __( 'The key is valid but does not own that source.', 'temso-ai' ),
 					'network'      => __( 'Could not reach Temso. Check the URL and your server connectivity.', 'temso-ai' ),
 					'unknown'      => __( 'Unexpected error. Check the URL and key.', 'temso-ai' ),
+				),
+			)
+		);
+
+		wp_enqueue_script(
+			'temso-publishing-setup',
+			plugins_url( 'assets/js/publishing-setup.js', TEMSO_FILE ),
+			array(),
+			TEMSO_VERSION,
+			true
+		);
+		wp_localize_script(
+			'temso-publishing-setup',
+			'temsoPublishing',
+			array(
+				'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+				'action'  => self::AJAX_CONNECT_PUBLISHING_ACTION,
+				'nonce'   => wp_create_nonce( self::AJAX_CONNECT_PUBLISHING_ACTION ),
+				'i18n'    => array(
+					'connecting' => __( 'Connecting…', 'temso-ai' ),
+					'success'    => __( 'Publishing connected.', 'temso-ai' ),
+					'missing'    => __( 'Paste the setup link or code from Temso first.', 'temso-ai' ),
+					'invalid'    => __( 'Setup link expired or invalid. Generate a new one in Temso.', 'temso-ai' ),
+					'forbidden'  => __( 'You do not have permission to connect publishing.', 'temso-ai' ),
+					'server'     => __( 'Temso had a problem completing setup. Try again.', 'temso-ai' ),
+					'network'    => __( 'Could not reach Temso. Try again.', 'temso-ai' ),
+					'unknown'    => __( 'Unexpected error. Try generating a new setup link in Temso.', 'temso-ai' ),
 				),
 			)
 		);
@@ -172,6 +220,299 @@ class Temso_Settings {
 	}
 
 	/**
+	 * AJAX handler for the "Connect publishing" button.
+	 *
+	 * Takes the one-time setup link/code the admin pasted from Temso, claims it
+	 * against Temso, and on success stores the publish shared secret locally.
+	 * The response is intentionally free of the secret — only a status code the
+	 * JS maps to a translated message is returned.
+	 */
+	public function ajax_connect_publishing() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'code' => 'forbidden' ), 403 );
+		}
+		check_ajax_referer( self::AJAX_CONNECT_PUBLISHING_ACTION, 'nonce' );
+
+		$raw = isset( $_POST['setup'] )
+			? sanitize_text_field( wp_unslash( $_POST['setup'] ) )
+			: '';
+
+		$setup = self::parse_setup( $raw );
+		$token = $setup['token'];
+		if ( '' === $token ) {
+			wp_send_json_error( array( 'code' => 'missing_token' ) );
+		}
+
+		$result = $this->connect_publishing( $token, $setup['claim_url'] );
+		if ( ! empty( $result['ok'] ) ) {
+			wp_send_json_success(
+				array(
+					'code'        => 'connected',
+					'connectedAt' => isset( $result['connected_at'] ) ? (int) $result['connected_at'] : 0,
+				)
+			);
+		}
+
+		wp_send_json_error( array( 'code' => isset( $result['code'] ) ? $result['code'] : 'unknown' ) );
+	}
+
+	/**
+	 * Extract the setup token from a pasted link or raw code.
+	 *
+	 * Temso shows either a bare token or a full setup URL carrying the token in
+	 * a query parameter; both are accepted. Pure string handling — no options or
+	 * network — so it is unit-testable in isolation.
+	 *
+	 * @param string $raw The value pasted into the setup field.
+	 * @return string The token, or '' when none could be extracted.
+	 */
+	public static function parse_setup_token( $raw ) {
+		$setup = self::parse_setup( $raw );
+		return $setup['token'];
+	}
+
+	/**
+	 * Extract the setup token and trusted claim endpoint from a pasted setup link.
+	 *
+	 * @param string $raw The value pasted into the setup field.
+	 * @return array{token:string,claim_url:string}
+	 */
+	public static function parse_setup( $raw ) {
+		$raw = trim( (string) $raw );
+		if ( '' === $raw ) {
+			return array(
+				'token'     => '',
+				'claim_url' => '',
+			);
+		}
+
+		// Not a URL — treat the whole paste as the token verbatim.
+		if ( ! preg_match( '#^https?://#i', $raw ) ) {
+			return array(
+				'token'     => $raw,
+				'claim_url' => '',
+			);
+		}
+
+		$query = wp_parse_url( $raw, PHP_URL_QUERY );
+		if ( ! is_string( $query ) || '' === $query ) {
+			return array(
+				'token'     => '',
+				'claim_url' => '',
+			);
+		}
+
+		$params = array();
+		wp_parse_str( $query, $params );
+		$token = '';
+		foreach ( array( 'wordpress_setup', 'setup_token', 'setupToken', 'token' ) as $key ) {
+			if ( ! empty( $params[ $key ] ) && is_string( $params[ $key ] ) ) {
+				$token = trim( $params[ $key ] );
+				break;
+			}
+		}
+
+		$claim_url = '';
+		if ( ! empty( $params['claim_url'] ) && is_string( $params['claim_url'] ) ) {
+			$claim_url = self::trusted_claim_url( $params['claim_url'] );
+		}
+
+		return array(
+			'token'     => $token,
+			'claim_url' => $claim_url,
+		);
+	}
+
+	/**
+	 * Accept only Temso-owned claim endpoints from pasted setup links.
+	 *
+	 * The setup link is pasted input, and the plugin sends the generated publish
+	 * secret to the claim URL. Keep this allowlist narrow so a hostile link cannot
+	 * redirect that secret to an arbitrary host.
+	 *
+	 * @param string $url Candidate claim URL from the setup link.
+	 * @return string Normalized trusted claim URL, or '' when untrusted.
+	 */
+	private static function trusted_claim_url( $url ) {
+		$url = trim( (string) $url );
+		if ( '' === $url ) {
+			return '';
+		}
+
+		$scheme = wp_parse_url( $url, PHP_URL_SCHEME );
+		$host   = wp_parse_url( $url, PHP_URL_HOST );
+		$path   = wp_parse_url( $url, PHP_URL_PATH );
+		if ( 'https' !== $scheme || ! is_string( $host ) || ! is_string( $path ) ) {
+			return '';
+		}
+
+		if ( '/v1/integrations/wordpress/setup-claim' !== rtrim( $path, '/' ) ) {
+			return '';
+		}
+
+		if ( 'api.temso.ai' === $host ) {
+			return self::DEFAULT_CLAIM_URL;
+		}
+		if ( 'api.development.temso.ai' === $host ) {
+			return self::DEVELOPMENT_CLAIM_URL;
+		}
+
+		return '';
+	}
+
+	/**
+	 * Resolve the Temso publishing claim endpoint.
+	 *
+	 * Defaults to the production endpoint. A setup link may carry a known Temso
+	 * development endpoint; anything else must be configured explicitly with the
+	 * TEMSO_PUBLISHING_CLAIM_URL constant or the `temso_publishing_claim_url`
+	 * filter. The plugin POSTs the freshly generated shared secret to this URL,
+	 * so pasted-link endpoints are hard-allowlisted before use.
+	 *
+	 * @param string $setup_claim_url Trusted setup-link claim URL, when present.
+	 * @return string
+	 */
+	public static function claim_url( $setup_claim_url = '' ) {
+		$url = self::trusted_claim_url( $setup_claim_url );
+		if ( '' === $url ) {
+			$url = self::DEFAULT_CLAIM_URL;
+		}
+		if ( defined( 'TEMSO_PUBLISHING_CLAIM_URL' ) && is_string( TEMSO_PUBLISHING_CLAIM_URL ) && '' !== TEMSO_PUBLISHING_CLAIM_URL ) {
+			$url = TEMSO_PUBLISHING_CLAIM_URL;
+		}
+
+		/**
+		 * Filter the Temso publishing claim endpoint URL.
+		 *
+		 * @param string $url The claim endpoint the setup token is POSTed to.
+		 */
+		return (string) apply_filters( 'temso_publishing_claim_url', $url );
+	}
+
+	/**
+	 * Claim a publishing setup token against Temso.
+	 *
+	 * Generates a publish shared secret when the site has none, then POSTs the
+	 * claim payload (token, site URL, REST base URL, version, capabilities, and
+	 * the secret) to Temso. The secret is persisted *before* the claim because
+	 * Temso verifies this site's capabilities endpoint during the claim, and
+	 * that only reports `publish: true` once a secret is saved. An existing
+	 * secret is reused so manual setups are not rotated out from under Temso.
+	 *
+	 * The returned array never contains the secret, so callers can forward it to
+	 * the browser safely.
+	 *
+	 * @param string $token     Setup token extracted from the pasted link/code.
+	 * @param string $claim_url Trusted claim endpoint from the pasted setup link, when present.
+	 * @return array{ok:bool,code:string,status?:int,connected_at?:int}
+	 */
+	public function connect_publishing( $token, $claim_url = '' ) {
+		$settings = self::get();
+		$secret   = isset( $settings['publish_secret'] ) ? (string) $settings['publish_secret'] : '';
+
+		if ( '' === $secret ) {
+			$secret = self::generate_publish_secret();
+			$this->save_option_fields( array( 'publish_secret' => $secret ) );
+		}
+
+		$site_url      = home_url();
+		$rest_base_url = untrailingslashit( rest_url( 'temso/v1' ) );
+
+		$payload = array(
+			'setupToken'    => $token,
+			'siteUrl'       => $site_url,
+			'restBaseUrl'   => $rest_base_url,
+			'sharedSecret'  => $secret,
+			'pluginVersion' => TEMSO_VERSION,
+			'features'      => Temso_Publisher::capability_features( $secret ),
+		);
+
+		$response = wp_remote_post(
+			self::claim_url( $claim_url ),
+			array(
+				'timeout'   => 15,
+				'sslverify' => true,
+				'headers'   => array(
+					'Content-Type' => 'application/json',
+					'Accept'       => 'application/json',
+				),
+				'body'      => wp_json_encode( $payload ),
+			)
+		);
+
+		if ( is_wp_error( $response ) ) {
+			return array(
+				'ok'   => false,
+				'code' => 'network',
+			);
+		}
+
+		$status = (int) wp_remote_retrieve_response_code( $response );
+
+		if ( $status >= 200 && $status < 300 ) {
+			$connected_at = time();
+			$this->save_option_fields(
+				array(
+					'publishing_connected_at'  => $connected_at,
+					'publishing_site_url'      => $site_url,
+					'publishing_rest_base_url' => $rest_base_url,
+				)
+			);
+
+			return array(
+				'ok'           => true,
+				'code'         => 'connected',
+				'connected_at' => $connected_at,
+			);
+		}
+
+		if ( $status >= 500 ) {
+			return array(
+				'ok'     => false,
+				'code'   => 'server_error',
+				'status' => $status,
+			);
+		}
+
+		// 4xx — invalid, expired, or already-claimed token. Temso returns a
+		// generic error here on purpose, so a single clear message is surfaced.
+		return array(
+			'ok'     => false,
+			'code'   => 'invalid_token',
+			'status' => $status,
+		);
+	}
+
+	/**
+	 * Generate a high-entropy, case-preserving publish shared secret.
+	 *
+	 * Base64url over 32 random bytes: URL-safe, no padding, and never run
+	 * through sanitize_key() (which would lowercase and corrupt it).
+	 *
+	 * @return string
+	 */
+	private static function generate_publish_secret() {
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- Encoding random bytes into a URL-safe secret, not obfuscating code.
+		return rtrim( strtr( base64_encode( random_bytes( 32 ) ), '+/', '-_' ), '=' );
+	}
+
+	/**
+	 * Merge a set of fields into the saved settings option.
+	 *
+	 * Reads the current option fresh and writes only the given keys, so the
+	 * setup-token AJAX path never clobbers ingest settings or each other.
+	 *
+	 * @param array $changes Key/value pairs to persist.
+	 */
+	private function save_option_fields( array $changes ) {
+		$saved = get_option( self::OPTION, array() );
+		if ( ! is_array( $saved ) ) {
+			$saved = array();
+		}
+		update_option( self::OPTION, array_merge( $saved, $changes ) );
+	}
+
+	/**
 	 * Prepend a Settings link to the plugin's row actions.
 	 *
 	 * @param array $links Existing plugin row action links.
@@ -221,9 +562,31 @@ class Temso_Settings {
 	public function sanitize( $input ) {
 		$input = is_array( $input ) ? $input : array();
 
+		$existing = get_option( self::OPTION, array() );
+		if ( ! is_array( $existing ) ) {
+			$existing = array();
+		}
+
 		// https only — the API key travels in the Authorization header, so a
 		// plain-http endpoint would leak it in cleartext.
 		$url = isset( $input['ingest_url'] ) ? esc_url_raw( trim( (string) $input['ingest_url'] ), array( 'https' ) ) : '';
+
+		// The publish shared secret is high-entropy and compared byte-for-byte
+		// in the HMAC check, so it must survive verbatim. sanitize_key() would
+		// lowercase it and sanitize_text_field() would strip `%xx` octets —
+		// either could silently corrupt a base64url secret — so only stray
+		// surrounding whitespace from a paste is trimmed. The field is never
+		// rendered with its saved value (printing a live credential into the
+		// page source would leak it), so an empty submit means "keep the saved
+		// secret" rather than "clear it" — only a freshly typed value replaces
+		// it. This also preserves a secret the setup-token flow generated.
+		$existing_secret        = isset( $existing['publish_secret'] ) ? (string) $existing['publish_secret'] : '';
+		$submitted_secret       = isset( $input['publish_secret'] ) ? trim( (string) $input['publish_secret'] ) : '';
+		$publish_secret         = '' !== $submitted_secret
+			? $submitted_secret
+			: $existing_secret;
+		$publish_secret_changed = '' !== $submitted_secret
+			&& ! hash_equals( $existing_secret, $submitted_secret );
 
 		// Temso keys are `tms_<lowercase-hex>`; sanitize_key() keeps exactly
 		// that character set, so it preserves any valid key while stripping
@@ -231,11 +594,38 @@ class Temso_Settings {
 		// Authorization header. sanitize_text_field() must not be used here:
 		// it collapses whitespace and strips `%xx` octets, both of which can
 		// silently mangle a secret.
-		return array(
-			'enabled'    => ! empty( $input['enabled'] ),
-			'ingest_url' => $url,
-			'api_key'    => isset( $input['api_key'] ) ? sanitize_key( $input['api_key'] ) : '',
+		$sanitized = array(
+			'enabled'        => ! empty( $input['enabled'] ),
+			'ingest_url'     => $url,
+			'api_key'        => isset( $input['api_key'] ) ? sanitize_key( $input['api_key'] ) : '',
+			'publish_secret' => $publish_secret,
 		);
+
+		// Connection status fields. register_setting() runs this sanitizer on
+		// EVERY update_option() for this option — including the setup-token AJAX
+		// claim's own save_option_fields() write — so they must be sourced from
+		// the incoming value, not only from $existing, or the claim's freshly
+		// recorded status would be stripped right back out before it ever hits
+		// the database. A normal settings-form save carries no connection fields,
+		// so it falls back to whatever the last claim recorded. Either way the
+		// status is dropped when the admin manually replaces the secret, because
+		// Temso then still holds the old secret and the connection is stale.
+		if ( ! $publish_secret_changed ) {
+			$connection_fields = array(
+				'publishing_connected_at'  => 'absint',
+				'publishing_site_url'      => 'esc_url_raw',
+				'publishing_rest_base_url' => 'esc_url_raw',
+			);
+			foreach ( $connection_fields as $key => $sanitizer ) {
+				if ( isset( $input[ $key ] ) ) {
+					$sanitized[ $key ] = call_user_func( $sanitizer, $input[ $key ] );
+				} elseif ( isset( $existing[ $key ] ) ) {
+					$sanitized[ $key ] = $existing[ $key ];
+				}
+			}
+		}
+
+		return $sanitized;
 	}
 
 	/**
@@ -325,6 +715,73 @@ class Temso_Settings {
 						</td>
 					</tr>
 				</table>
+
+				<h2><?php esc_html_e( 'Publishing', 'temso-ai' ); ?></h2>
+				<p>
+					<?php esc_html_e( 'Let Temso create and update posts on this site. In Temso, open Settings → Integrations → WordPress to generate a one-time setup link, paste it below, and click Connect publishing. The plugin and Temso exchange the publish secret for you — there is nothing to copy by hand.', 'temso-ai' ); ?>
+				</p>
+				<table class="form-table" role="presentation">
+					<tr>
+						<th scope="row"><?php esc_html_e( 'Status', 'temso-ai' ); ?></th>
+						<td>
+							<?php if ( $settings['publishing_connected_at'] > 0 ) : ?>
+								<strong><?php esc_html_e( 'Publishing connected.', 'temso-ai' ); ?></strong>
+								<?php
+								echo ' ';
+								echo esc_html(
+									sprintf(
+										/* translators: %s: human-readable time difference. */
+										__( 'Connected %s ago.', 'temso-ai' ),
+										human_time_diff( $settings['publishing_connected_at'] )
+									)
+								);
+								?>
+							<?php elseif ( '' !== $settings['publish_secret'] ) : ?>
+								<?php esc_html_e( 'A publish secret is configured, but no Temso connection has been recorded yet. Paste a setup link to (re)connect.', 'temso-ai' ); ?>
+							<?php else : ?>
+								<?php esc_html_e( 'Not connected.', 'temso-ai' ); ?>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">
+							<label for="temso-setup-link"><?php esc_html_e( 'Publishing setup link', 'temso-ai' ); ?></label>
+						</th>
+						<td>
+							<input type="text" id="temso-setup-link" class="regular-text code"
+								autocomplete="off"
+								placeholder="https://app.temso.ai/…?wordpress_setup=…" />
+							<p>
+								<button type="button" class="button button-primary" id="temso-connect-publishing-btn">
+									<?php esc_html_e( 'Connect publishing', 'temso-ai' ); ?>
+								</button>
+								<span id="temso-publishing-result" aria-live="polite" style="margin-left:8px;"></span>
+							</p>
+							<p class="description">
+								<?php esc_html_e( 'Paste the full setup link or just the code from Temso. The plugin generates a publish secret if needed and registers this site with Temso.', 'temso-ai' ); ?>
+							</p>
+						</td>
+					</tr>
+				</table>
+
+				<details style="margin:1em 0;">
+					<summary><?php esc_html_e( 'Advanced: set the publish secret manually', 'temso-ai' ); ?></summary>
+					<table class="form-table" role="presentation">
+						<tr>
+							<th scope="row">
+								<label for="temso-publish-secret"><?php esc_html_e( 'Publish shared secret', 'temso-ai' ); ?></label>
+							</th>
+							<td>
+								<input type="password" id="temso-publish-secret" class="regular-text code"
+									name="<?php echo esc_attr( self::OPTION ); ?>[publish_secret]"
+									value="" autocomplete="off" />
+								<p class="description">
+									<?php esc_html_e( 'For staging or manual recovery only — the setup link above is the recommended path. The saved secret is never displayed; leave this blank to keep the current one, or enter a new value and Save to replace it.', 'temso-ai' ); ?>
+								</p>
+							</td>
+						</tr>
+					</table>
+				</details>
 				<?php submit_button(); ?>
 			</form>
 		</div>
