@@ -20,6 +20,7 @@ if ( ! defined( 'TEMSO_VERSION' ) ) {
 }
 
 require_once dirname( __DIR__, 2 ) . '/includes/class-temso-settings.php';
+require_once dirname( __DIR__, 2 ) . '/includes/class-temso-media.php';
 require_once dirname( __DIR__, 2 ) . '/includes/class-temso-publisher.php';
 
 if ( ! class_exists( 'WP_Error' ) ) {
@@ -120,7 +121,15 @@ final class PublisherTest extends TestCase {
 		Functions\when( 'sanitize_title' )->returnArg();
 		Functions\when( 'wp_kses_post' )->returnArg();
 		Functions\when( 'esc_url_raw' )->returnArg();
+		Functions\when( 'esc_attr' )->returnArg();
+		Functions\when( 'sanitize_file_name' )->returnArg();
 		Functions\when( 'sanitize_key' )->returnArg();
+		// Pass-through filters so Temso_Media's host check runs against defaults.
+		Functions\when( 'apply_filters' )->alias(
+			static function ( $tag, $value = null ) {
+				return $value;
+			}
+		);
 		Functions\when( 'absint' )->alias(
 			static function ( $value ) {
 				return (int) $value;
@@ -178,8 +187,27 @@ final class PublisherTest extends TestCase {
 
 		$this->assertSame( TEMSO_VERSION, $caps['pluginVersion'] );
 		$this->assertArrayHasKey( 'publish', $caps['features'] );
+		$this->assertArrayHasKey( 'media', $caps['features'] );
 		$this->assertArrayHasKey( 'yoastMeta', $caps['features'] );
 		$this->assertArrayHasKey( 'rankMathMeta', $caps['features'] );
+	}
+
+	public function test_capabilities_reports_media_true(): void {
+		$this->stub_secret( 'a-configured-shared-secret-0001' );
+
+		$caps = ( new Temso_Publisher() )->capabilities();
+
+		// media is a static code capability, advertised regardless of the secret.
+		$this->assertTrue( $caps['features']['media'] );
+	}
+
+	public function test_capabilities_reports_media_true_without_secret(): void {
+		$this->stub_secret( '' );
+
+		$caps = ( new Temso_Publisher() )->capabilities();
+
+		$this->assertTrue( $caps['features']['media'] );
+		$this->assertFalse( $caps['features']['publish'] );
 	}
 
 	public function test_capabilities_reports_publish_false_without_secret(): void {
@@ -592,6 +620,457 @@ final class PublisherTest extends TestCase {
 		$this->assertSame( 'SEO Title', $meta['rank_math_title'] );
 		$this->assertSame( 'SEO Description', $meta['rank_math_description'] );
 		$this->assertSame( 'https://example.com/canonical', $meta['rank_math_canonical_url'] );
+	}
+
+	public function test_yoast_open_graph_twitter_and_robots_meta_are_written(): void {
+		$meta = array();
+		Functions\when( 'wp_insert_post' )->justReturn( 401 );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/x/' );
+		Functions\when( 'update_post_meta' )->alias(
+			static function ( $post_id, $key, $value ) use ( &$meta ) {
+				$meta[ $key ] = $value;
+				return true;
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'seo'         => array(
+					'robots'    => 'noindex, nofollow',
+					'openGraph' => array(
+						'title'       => 'OG Title',
+						'description' => 'OG Description',
+						'imageUrl'    => 'https://example.com/og.png',
+					),
+					'twitter'   => array(
+						'card'        => 'summary_large_image',
+						'title'       => 'TW Title',
+						'description' => 'TW Description',
+						'imageUrl'    => 'https://example.com/tw.png',
+					),
+				),
+			)
+		);
+
+		( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( 'OG Title', $meta['_yoast_wpseo_opengraph-title'] );
+		$this->assertSame( 'OG Description', $meta['_yoast_wpseo_opengraph-description'] );
+		$this->assertSame( 'https://example.com/og.png', $meta['_yoast_wpseo_opengraph-image'] );
+		$this->assertSame( 'TW Title', $meta['_yoast_wpseo_twitter-title'] );
+		$this->assertSame( 'TW Description', $meta['_yoast_wpseo_twitter-description'] );
+		$this->assertSame( 'https://example.com/tw.png', $meta['_yoast_wpseo_twitter-image'] );
+		$this->assertSame( '1', $meta['_yoast_wpseo_meta-robots-noindex'] );
+		$this->assertSame( '1', $meta['_yoast_wpseo_meta-robots-nofollow'] );
+	}
+
+	public function test_rank_math_open_graph_twitter_and_robots_meta_are_written(): void {
+		$meta = array();
+		Functions\when( 'wp_insert_post' )->justReturn( 402 );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/x/' );
+		Functions\when( 'update_post_meta' )->alias(
+			static function ( $post_id, $key, $value ) use ( &$meta ) {
+				$meta[ $key ] = $value;
+				return true;
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'seo'         => array(
+					'robots'    => 'noindex, nofollow',
+					'openGraph' => array(
+						'title'       => 'OG Title',
+						'description' => 'OG Description',
+						'imageUrl'    => 'https://example.com/og.png',
+					),
+					'twitter'   => array(
+						'card'        => 'summary',
+						'title'       => 'TW Title',
+						'description' => 'TW Description',
+						'imageUrl'    => 'https://example.com/tw.png',
+					),
+				),
+			)
+		);
+
+		( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( 'OG Title', $meta['rank_math_facebook_title'] );
+		$this->assertSame( 'OG Description', $meta['rank_math_facebook_description'] );
+		$this->assertSame( 'https://example.com/og.png', $meta['rank_math_facebook_image'] );
+		$this->assertSame( 'off', $meta['rank_math_twitter_use_facebook'] );
+		$this->assertSame( 'TW Title', $meta['rank_math_twitter_title'] );
+		$this->assertSame( 'TW Description', $meta['rank_math_twitter_description'] );
+		$this->assertSame( 'https://example.com/tw.png', $meta['rank_math_twitter_image'] );
+		// Payload 'summary' maps to Rank Math's 'summary_card' slug.
+		$this->assertSame( 'summary_card', $meta['rank_math_twitter_card_type'] );
+		$this->assertSame( array( 'noindex', 'nofollow' ), $meta['rank_math_robots'] );
+	}
+
+	public function test_seo_index_follow_robots_clears_robots_meta(): void {
+		$meta = array();
+		Functions\when( 'wp_insert_post' )->justReturn( 403 );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/x/' );
+		Functions\when( 'update_post_meta' )->alias(
+			static function ( $post_id, $key, $value ) use ( &$meta ) {
+				$meta[ $key ] = $value;
+				return true;
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'seo'         => array( 'robots' => 'index, follow' ),
+			)
+		);
+
+		( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		// 'index, follow' is present and authoritative: it writes a definitive
+		// default that clears any prior noindex/nofollow when a post is re-published.
+		$this->assertSame( '0', $meta['_yoast_wpseo_meta-robots-noindex'] );
+		$this->assertSame( '0', $meta['_yoast_wpseo_meta-robots-nofollow'] );
+		$this->assertSame( array( 'index' ), $meta['rank_math_robots'] );
+	}
+
+	public function test_seo_without_robots_field_leaves_robots_meta_untouched(): void {
+		$meta = array();
+		Functions\when( 'wp_insert_post' )->justReturn( 404 );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/x/' );
+		Functions\when( 'update_post_meta' )->alias(
+			static function ( $post_id, $key, $value ) use ( &$meta ) {
+				$meta[ $key ] = $value;
+				return true;
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'seo'         => array( 'metaTitle' => 'Only a title' ),
+			)
+		);
+
+		( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		// No robots field means no opinion: the site's robots meta is never touched.
+		$this->assertArrayNotHasKey( '_yoast_wpseo_meta-robots-noindex', $meta );
+		$this->assertArrayNotHasKey( '_yoast_wpseo_meta-robots-nofollow', $meta );
+		$this->assertArrayNotHasKey( 'rank_math_robots', $meta );
+	}
+
+	/* ----------------------------------------------------------------- *
+	 * Media sideloading (via publish)
+	 * ----------------------------------------------------------------- */
+
+	/**
+	 * Stub the media download/attach path used by Temso_Media::sideload().
+	 *
+	 * @param int    $id        Attachment ID media_handle_sideload returns.
+	 * @param string $local_url Local URL wp_get_attachment_url returns.
+	 */
+	private function stub_media( int $id, string $local_url ): void {
+		Functions\when( 'get_posts' )->justReturn( array() );
+		Functions\when( 'download_url' )->justReturn( '/tmp/temso-dl' );
+		Functions\when( 'wp_getimagesize' )->justReturn(
+			array(
+				0      => 800,
+				1      => 600,
+				'mime' => 'image/webp',
+			)
+		);
+		Functions\when( 'media_handle_sideload' )->justReturn( $id );
+		Functions\when( 'wp_get_attachment_url' )->justReturn( $local_url );
+		Functions\when( 'wp_get_attachment_image_srcset' )->justReturn( '' );
+		Functions\when( 'wp_read_image_metadata' )->justReturn( array() );
+		Functions\when( 'wp_delete_file' )->justReturn( true );
+		Functions\when( 'set_post_thumbnail' )->justReturn( true );
+	}
+
+	public function test_publish_rewrites_inline_temso_image_to_local_url(): void {
+		$content = null;
+		Functions\when( 'wp_insert_post' )->justReturn( 200 );
+		Functions\when( 'update_post_meta' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/p/' );
+		Functions\when( 'wp_update_post' )->alias(
+			static function ( $postarr ) use ( &$content ) {
+				$content = $postarr['post_content'];
+				return 200;
+			}
+		);
+		$this->stub_media( 88, 'https://example.com/wp-content/uploads/cover.webp' );
+
+		$body = $this->encode(
+			array(
+				'html'        => '<!-- wp:image --><figure class="wp-block-image"><img src="https://storage.googleapis.com/temso-public-prod/cover.webp" alt="c"/></figure><!-- /wp:image -->',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+			)
+		);
+
+		( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertNotNull( $content, 'Inline rewrite must persist via wp_update_post.' );
+		$this->assertStringContainsString( 'https://example.com/wp-content/uploads/cover.webp', $content );
+		$this->assertStringContainsString( 'wp-image-88', $content );
+		$this->assertStringNotContainsString( 'storage.googleapis.com', $content );
+	}
+
+	public function test_publish_succeeds_even_if_rewritten_content_fails_to_persist(): void {
+		// Inline rehosting is best-effort: if persisting the rewritten body fails,
+		// the publish must still succeed (the post keeps its hotlinked images)
+		// rather than 500 — a post-write failure would orphan/duplicate the post.
+		$this->stub_media( 88, 'https://example.com/uploads/cover.webp' );
+		Functions\when( 'wp_insert_post' )->justReturn( 202 );
+		Functions\when( 'update_post_meta' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/p/' );
+		// Simulate the content update failing.
+		Functions\when( 'wp_update_post' )->justReturn( 0 );
+
+		$body = $this->encode(
+			array(
+				'html'        => '<img src="https://storage.googleapis.com/temso-public-prod/cover.webp" alt="c"/>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+			)
+		);
+
+		$result = ( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( '202', $result['externalId'] );
+		$this->assertSame( 'published', $result['remoteState'] );
+	}
+
+	public function test_publish_update_succeeds_even_if_content_repersist_fails(): void {
+		// Same best-effort guarantee on the UPDATE path: the first wp_update_post()
+		// (create_or_update_post, with the original body) succeeds; the second one
+		// (persisting the rehosted body) fails. The publish must still succeed.
+		$this->stub_media( 88, 'https://example.com/uploads/cover.webp' );
+		$calls = 0;
+		Functions\when( 'get_post' )->alias(
+			static function ( $id ) {
+				return (object) array(
+					'ID'        => $id,
+					'post_type' => 'post',
+				);
+			}
+		);
+		Functions\when( 'update_post_meta' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/p/' );
+		Functions\when( 'wp_update_post' )->alias(
+			static function ( $postarr ) use ( &$calls ) {
+				++$calls;
+				// First call writes the post (success); second persists the
+				// rewritten body (simulated failure).
+				return 1 === $calls ? 55 : 0;
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'        => '<img src="https://storage.googleapis.com/temso-public-prod/cover.webp" alt="c"/>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'externalId'  => '55',
+			)
+		);
+
+		$result = ( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( '55', $result['externalId'] );
+		$this->assertSame( 'published', $result['remoteState'] );
+		$this->assertSame( 2, $calls, 'Both the initial write and the content repersist are attempted.' );
+	}
+
+	public function test_publish_leaves_external_inline_image_hotlinked(): void {
+		$update_called = false;
+		$downloaded    = false;
+		$this->stub_media( 1, 'https://example.com/uploads/x.webp' );
+		Functions\when( 'wp_insert_post' )->justReturn( 201 );
+		Functions\when( 'update_post_meta' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/p/' );
+		Functions\when( 'wp_update_post' )->alias(
+			static function () use ( &$update_called ) {
+				$update_called = true;
+				return 201;
+			}
+		);
+		// A non-Temso URL must never be fetched.
+		Functions\when( 'download_url' )->alias(
+			static function () use ( &$downloaded ) {
+				$downloaded = true;
+				return '/tmp/x';
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'        => '<img src="https://cdn.example.com/third-party.jpg" alt="x"/>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+			)
+		);
+
+		$result = ( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( '201', $result['externalId'] );
+		$this->assertFalse( $downloaded, 'A non-Temso image must never be downloaded.' );
+		$this->assertFalse( $update_called, 'A non-Temso image triggers no content rewrite/update.' );
+	}
+
+	public function test_publish_sets_featured_image_thumbnail(): void {
+		$thumb = null;
+		$alt   = null;
+		$this->stub_media( 91, 'https://example.com/wp-content/uploads/cover.webp' );
+		Functions\when( 'wp_insert_post' )->justReturn( 300 );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/p/' );
+		Functions\when( 'update_post_meta' )->alias(
+			static function ( $post_id, $key, $value ) use ( &$alt ) {
+				if ( '_wp_attachment_image_alt' === $key ) {
+					$alt = $value;
+				}
+				return true;
+			}
+		);
+		Functions\when( 'set_post_thumbnail' )->alias(
+			static function ( $post_id, $attachment_id ) use ( &$thumb ) {
+				$thumb = array( $post_id, $attachment_id );
+				return true;
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'          => '<p>No inline images.</p>',
+				'title'         => 'T',
+				'slug'          => 's',
+				'targetState'   => 'published',
+				'featuredImage' => array(
+					'url' => 'https://storage.googleapis.com/temso-public-prod/cover.webp',
+					'alt' => 'Cover alt',
+				),
+			)
+		);
+
+		( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( array( 300, 91 ), $thumb );
+		$this->assertSame( 'Cover alt', $alt );
+	}
+
+	public function test_publish_fails_when_featured_image_cannot_be_sideloaded(): void {
+		$insert_called = false;
+		$this->stub_media( 1, 'https://example.com/uploads/x.webp' );
+		Functions\when( 'wp_insert_post' )->alias(
+			static function () use ( &$insert_called ) {
+				$insert_called = true;
+				return 301;
+			}
+		);
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/p/' );
+		// Featured download fails: a transient error the backend should retry.
+		Functions\when( 'download_url' )->justReturn( new WP_Error( 'http_request_failed', 'boom' ) );
+
+		$body = $this->encode(
+			array(
+				'html'          => '<p>x</p>',
+				'title'         => 'T',
+				'slug'          => 's',
+				'targetState'   => 'published',
+				'featuredImage' => array(
+					'url' => 'https://storage.googleapis.com/temso-public-prod/cover.webp',
+				),
+			)
+		);
+
+		$result = ( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assert_error_code( 'temso_publish_featured_failed', $result );
+		$this->assertSame( 502, $result->get_error_data()['status'] );
+		// The strict featured failure must abort BEFORE any post is written, so a
+		// backend retry cannot create a duplicate or leave an orphaned draft.
+		$this->assertFalse( $insert_called, 'No post may be created when the featured image fails.' );
+	}
+
+	public function test_publish_rejects_non_object_featured_image(): void {
+		$body = $this->encode(
+			array(
+				'html'          => '<p>x</p>',
+				'title'         => 'T',
+				'slug'          => 's',
+				'targetState'   => 'published',
+				'featuredImage' => 'not-an-object',
+			)
+		);
+
+		$this->assert_error_code(
+			'temso_publish_invalid_payload',
+			( new Temso_Publisher() )->publish( $this->request( $body, array() ) )
+		);
+	}
+
+	public function test_publish_rejects_featured_image_without_url(): void {
+		$body = $this->encode(
+			array(
+				'html'          => '<p>x</p>',
+				'title'         => 'T',
+				'slug'          => 's',
+				'targetState'   => 'published',
+				'featuredImage' => array( 'alt' => 'no url here' ),
+			)
+		);
+
+		$this->assert_error_code(
+			'temso_publish_invalid_payload',
+			( new Temso_Publisher() )->publish( $this->request( $body, array() ) )
+		);
+	}
+
+	public function test_publish_rejects_non_https_featured_image_url(): void {
+		// Mimic esc_url_raw's protocol allowlist: http is stripped to ''.
+		Functions\when( 'esc_url_raw' )->alias(
+			static function ( $url, $protocols = null ) {
+				if ( is_array( $protocols ) && ! in_array( wp_parse_url( $url, PHP_URL_SCHEME ), $protocols, true ) ) {
+					return '';
+				}
+				return $url;
+			}
+		);
+
+		$body = $this->encode(
+			array(
+				'html'          => '<p>x</p>',
+				'title'         => 'T',
+				'slug'          => 's',
+				'targetState'   => 'published',
+				'featuredImage' => array( 'url' => 'http://storage.googleapis.com/temso-public-prod/cover.webp' ),
+			)
+		);
+
+		$this->assert_error_code(
+			'temso_publish_invalid_payload',
+			( new Temso_Publisher() )->publish( $this->request( $body, array() ) )
+		);
 	}
 
 	/* ----------------------------------------------------------------- *

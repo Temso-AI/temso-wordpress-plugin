@@ -68,6 +68,31 @@ final class SettingsPublishingTest extends TestCase {
 		);
 		// claim_url() runs its default URL through this filter.
 		Functions\when( 'apply_filters' )->returnArg( 2 );
+		// parse_setup() sanitizes the extracted token. Mirror WP faithfully,
+		// including the %xx-octet stripping that makes this function unsafe to
+		// run over the whole setup paste (the bug this suite guards against).
+		Functions\when( 'sanitize_text_field' )->alias(
+			static function ( $value ) {
+				$value = preg_replace( '/[\r\n\t ]+/', ' ', (string) $value );
+				$value = trim( $value );
+				while ( preg_match( '/%[a-f0-9]{2}/i', $value, $m ) ) {
+					$value = str_replace( $m[0], '', $value );
+				}
+				return $value;
+			}
+		);
+	}
+
+	/**
+	 * Normalize a pasted setup link exactly as ajax_connect_publishing() does
+	 * before handing it to parse_setup(): unslash and trim, but never run it
+	 * through sanitize_text_field() (which would strip the claim_url's %xx octets).
+	 *
+	 * @param string $raw Raw paste, as it arrives in $_POST['setup'].
+	 * @return string
+	 */
+	private function normalize_paste( string $raw ): string {
+		return trim( $raw );
 	}
 
 	protected function tearDown(): void {
@@ -123,6 +148,42 @@ final class SettingsPublishingTest extends TestCase {
 			),
 			Temso_Settings::parse_setup( $url )
 		);
+	}
+
+	/**
+	 * Regression: a real pasted setup link carries the claim_url percent-encoded
+	 * inside its query string. The AJAX handler must hand that paste to
+	 * parse_setup() WITHOUT running it through sanitize_text_field(), or the %xx
+	 * octets are stripped, the dev claim_url is mangled, the claim silently falls
+	 * back to production, and the dev setup token comes back as invalid_token.
+	 */
+	public function test_handler_normalization_preserves_encoded_dev_claim_url(): void {
+		$raw = 'https://development.temso.ai/t/69822544a991e6b629c7dd69/p/wBvw/app/settings/integrations'
+			. '?wordpress_setup=wpsetup_q1L26zomq3vynVY8KyqAncmXy5I8eMrF05V66Me-6ko'
+			. '&claim_url=' . rawurlencode( Temso_Settings::DEVELOPMENT_CLAIM_URL );
+
+		$this->assertSame(
+			array(
+				'token'     => 'wpsetup_q1L26zomq3vynVY8KyqAncmXy5I8eMrF05V66Me-6ko',
+				'claim_url' => Temso_Settings::DEVELOPMENT_CLAIM_URL,
+			),
+			Temso_Settings::parse_setup( $this->normalize_paste( $raw ) )
+		);
+	}
+
+	/**
+	 * Documents the bug: running the whole paste through sanitize_text_field()
+	 * eats the claim_url's %xx octets, so parse_setup() can no longer recover a
+	 * trusted endpoint. This is why the handler must not sanitize the paste.
+	 */
+	public function test_sanitize_text_field_over_whole_paste_loses_claim_url(): void {
+		$raw = 'https://development.temso.ai/x?wordpress_setup=wpsetup_abc123'
+			. '&claim_url=' . rawurlencode( Temso_Settings::DEVELOPMENT_CLAIM_URL );
+
+		// The pre-fix handler behavior: sanitize the entire paste up front.
+		$mangled = sanitize_text_field( $raw );
+
+		$this->assertSame( '', Temso_Settings::parse_setup( $mangled )['claim_url'] );
 	}
 
 	public function test_parse_setup_token_reads_generic_token_param_from_url(): void {
@@ -257,6 +318,19 @@ final class SettingsPublishingTest extends TestCase {
 
 		$this->assertTrue( $result['ok'] );
 		$this->assertSame( Temso_Settings::DEVELOPMENT_CLAIM_URL, $state->captured['url'] );
+	}
+
+	public function test_claim_uses_generous_timeout_for_cold_handshake(): void {
+		$state = $this->wire( array(), 200 );
+		( new Temso_Settings() )->connect_publishing( 'wpsetup_token123' );
+
+		// The claim must out-wait Temso's /capabilities callback to a cold site, so
+		// a slow-but-successful handshake is not misreported as a `network` error.
+		$this->assertSame(
+			Temso_Settings::CLAIM_TIMEOUT_SECONDS,
+			$state->captured['args']['timeout']
+		);
+		$this->assertGreaterThanOrEqual( 20, $state->captured['args']['timeout'] );
 	}
 
 	public function test_claim_reuses_existing_secret(): void {

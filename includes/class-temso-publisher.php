@@ -94,12 +94,19 @@ class Temso_Publisher {
 	 * it is answering an inbound capabilities request or describing itself in a
 	 * claim payload. `publish` is true exactly when a secret is configured.
 	 *
+	 * `media` is a static code capability (inline image sideloading + featured
+	 * image), so it is reported unconditionally — unlike `publish`, it does not
+	 * depend on a secret being configured. The backend keys off it to decide
+	 * whether to send `featuredImage` and expect Temso-bucket images to be
+	 * rehosted.
+	 *
 	 * @param string $secret Configured publish shared secret ('' when unset).
-	 * @return array{publish:bool,yoastMeta:bool,rankMathMeta:bool}
+	 * @return array{publish:bool,media:bool,yoastMeta:bool,rankMathMeta:bool}
 	 */
 	public static function capability_features( $secret ) {
 		return array(
 			'publish'      => '' !== (string) $secret,
+			'media'        => true,
 			'yoastMeta'    => self::is_yoast_active(),
 			'rankMathMeta' => self::is_rank_math_active(),
 		);
@@ -142,9 +149,37 @@ class Temso_Publisher {
 			return $payload;
 		}
 
+		$media = new Temso_Media();
+
+		// Sideload the featured image BEFORE writing the post. Featured handling
+		// is strict, so a failure here must abort the publish without having
+		// created or updated a post — that avoids orphaned drafts and duplicate
+		// posts on a backend retry. The media layer sets the right HTTP status so
+		// the backend can tell a permanent 4xx from a retryable 5xx.
+		$featured = $media->sideload_featured( $payload['featured_image'] );
+		if ( is_wp_error( $featured ) ) {
+			return $featured;
+		}
+
 		$post_id = $this->create_or_update_post( $payload );
 		if ( is_wp_error( $post_id ) ) {
 			return $post_id;
+		}
+
+		// Past this point the post exists, so the publish has effectively
+		// succeeded: the remaining media work is best-effort and must never turn
+		// a written post into a failed publish (which would orphan it, or
+		// duplicate it on a backend retry of a create). Attach the featured
+		// thumbnail and rehost Temso-bucket inline images; if rewritten content
+		// fails to persist, the post simply keeps its hotlinked images.
+		$rehost = $media->apply_to_post( $post_id, $payload['html'], $featured );
+		if ( ! empty( $rehost['content_changed'] ) ) {
+			wp_update_post(
+				array(
+					'ID'           => $post_id,
+					'post_content' => $rehost['html'],
+				)
+			);
 		}
 
 		// SEO metadata is best-effort: a failure to write it must never fail the
@@ -288,7 +323,7 @@ class Temso_Publisher {
 				);
 			}
 			$external_id = (string) $data['externalId'];
-			if ( $external_id !== (string) (int) $external_id ) {
+			if ( (string) (int) $external_id !== $external_id ) {
 				return new WP_Error(
 					'temso_publish_invalid_payload',
 					'externalId must be a positive post ID string.',
@@ -302,15 +337,67 @@ class Temso_Publisher {
 			return $seo;
 		}
 
+		$featured_image = $this->parse_featured_image( isset( $data['featuredImage'] ) ? $data['featuredImage'] : null );
+		if ( is_wp_error( $featured_image ) ) {
+			return $featured_image;
+		}
+
 		return array(
-			'title'       => sanitize_text_field( $data['title'] ),
-			'slug'        => sanitize_title( $data['slug'] ),
+			'title'          => sanitize_text_field( $data['title'] ),
+			'slug'           => sanitize_title( $data['slug'] ),
 			// Temso already sanitizes HTML, but wp_kses_post() is defense in
 			// depth on the WordPress side.
-			'html'        => wp_kses_post( $data['html'] ),
-			'status'      => 'published' === $data['targetState'] ? 'publish' : 'draft',
-			'external_id' => $external_id,
-			'seo'         => $seo,
+			'html'           => wp_kses_post( $data['html'] ),
+			'status'         => 'published' === $data['targetState'] ? 'publish' : 'draft',
+			'external_id'    => $external_id,
+			'seo'            => $seo,
+			'featured_image' => $featured_image,
+		);
+	}
+
+	/**
+	 * Validate and sanitize the optional featured-image block.
+	 *
+	 * Shape is `{ "url": "https://…", "alt": "…" }`. The URL is required when the
+	 * block is present and must be https — it is sideloaded into the media
+	 * library, so a non-https or empty URL is a hard error rather than a silent
+	 * skip. The whole block is absent when the piece has no cover image.
+	 *
+	 * @param mixed $featured Raw featuredImage value from the payload.
+	 * @return array|WP_Error|null Sanitized { url, alt }, null when absent, or an
+	 *                             error on invalid input.
+	 */
+	private function parse_featured_image( $featured ) {
+		if ( null === $featured ) {
+			return null;
+		}
+
+		if ( ! is_array( $featured ) ) {
+			return new WP_Error(
+				'temso_publish_invalid_payload',
+				'featuredImage must be an object.',
+				array( 'status' => 400 )
+			);
+		}
+
+		$url = isset( $featured['url'] ) && is_string( $featured['url'] )
+			? esc_url_raw( trim( $featured['url'] ), array( 'https' ) )
+			: '';
+		if ( '' === $url ) {
+			return new WP_Error(
+				'temso_publish_invalid_payload',
+				'featuredImage.url must be a non-empty https URL.',
+				array( 'status' => 400 )
+			);
+		}
+
+		$alt = isset( $featured['alt'] ) && is_string( $featured['alt'] )
+			? sanitize_text_field( $featured['alt'] )
+			: '';
+
+		return array(
+			'url' => $url,
+			'alt' => $alt,
 		);
 	}
 
@@ -357,7 +444,150 @@ class Temso_Publisher {
 			}
 		}
 
+		// robots: a free directive string like "noindex, nofollow". When present it
+		// is authoritative, so it is always recorded (even "index, follow") to let
+		// the writer set a definitive state and clear a stale one on re-publish.
+		if ( isset( $seo['robots'] ) ) {
+			if ( ! is_string( $seo['robots'] ) ) {
+				return new WP_Error(
+					'temso_publish_invalid_payload',
+					'seo.robots must be a string.',
+					array( 'status' => 400 )
+				);
+			}
+			$out['robots'] = self::parse_robots( $seo['robots'] );
+		}
+
+		$open_graph = $this->parse_seo_object(
+			isset( $seo['openGraph'] ) ? $seo['openGraph'] : null,
+			'seo.openGraph',
+			array(
+				'title'       => 'sanitize_text_field',
+				'description' => 'sanitize_textarea_field',
+				'imageUrl'    => 'esc_url_raw',
+			)
+		);
+		if ( is_wp_error( $open_graph ) ) {
+			return $open_graph;
+		}
+		if ( ! empty( $open_graph ) ) {
+			$out['openGraph'] = $open_graph;
+		}
+
+		$twitter = $this->parse_seo_object(
+			isset( $seo['twitter'] ) ? $seo['twitter'] : null,
+			'seo.twitter',
+			array(
+				'title'       => 'sanitize_text_field',
+				'description' => 'sanitize_textarea_field',
+				'imageUrl'    => 'esc_url_raw',
+			)
+		);
+		if ( is_wp_error( $twitter ) ) {
+			return $twitter;
+		}
+		// card is a constrained enum, not free text; validate and pass it through.
+		if ( isset( $seo['twitter'] ) && is_array( $seo['twitter'] ) && isset( $seo['twitter']['card'] ) ) {
+			$card = is_string( $seo['twitter']['card'] ) ? $seo['twitter']['card'] : '';
+			if ( in_array( $card, array( 'summary', 'summary_large_image' ), true ) ) {
+				$twitter['card'] = $card;
+			}
+		}
+		if ( ! empty( $twitter ) ) {
+			$out['twitter'] = $twitter;
+		}
+
 		return $out;
+	}
+
+	/**
+	 * Sanitize a flat map of string fields, dropping empties.
+	 *
+	 * @param array  $source       Raw values to read from.
+	 * @param array  $map          Field name => sanitizer callable.
+	 * @param string $label_prefix Error-message prefix for the field path.
+	 * @return array|WP_Error Sanitized non-empty fields, or an error on bad type.
+	 */
+	private function parse_seo_strings( array $source, array $map, $label_prefix ) {
+		$out = array();
+		foreach ( $map as $key => $sanitizer ) {
+			if ( ! isset( $source[ $key ] ) ) {
+				continue;
+			}
+			if ( ! is_string( $source[ $key ] ) ) {
+				return new WP_Error(
+					'temso_publish_invalid_payload',
+					$label_prefix . $key . ' must be a string.',
+					array( 'status' => 400 )
+				);
+			}
+			$value = call_user_func( $sanitizer, $source[ $key ] );
+			if ( '' !== $value ) {
+				$out[ $key ] = $value;
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Validate and sanitize an optional nested SEO object (openGraph/twitter).
+	 *
+	 * @param mixed  $value Raw nested object, or null when absent.
+	 * @param string $label Field path used in error messages.
+	 * @param array  $map   Field name => sanitizer callable for the object strings.
+	 * @return array|WP_Error Sanitized fields (possibly empty), or an error.
+	 */
+	private function parse_seo_object( $value, $label, array $map ) {
+		if ( null === $value ) {
+			return array();
+		}
+		if ( ! is_array( $value ) ) {
+			return new WP_Error(
+				'temso_publish_invalid_payload',
+				$label . ' must be an object.',
+				array( 'status' => 400 )
+			);
+		}
+
+		return $this->parse_seo_strings( $value, $map, $label . '.' );
+	}
+
+	/**
+	 * Parse a robots directive string into explicit noindex/nofollow flags.
+	 *
+	 * Tokenizes on commas/whitespace and matches the exact directives noindex,
+	 * nofollow, and none (= noindex + nofollow) — substrings of unrelated tokens
+	 * never match. Both flags are always returned so the caller can write a
+	 * definitive robots state (and clear a stale one); "index, follow" yields
+	 * both false rather than an empty result.
+	 *
+	 * @param string $robots Raw robots directive string.
+	 * @return array{noindex:bool,nofollow:bool}
+	 */
+	private static function parse_robots( $robots ) {
+		$flags = array(
+			'noindex'  => false,
+			'nofollow' => false,
+		);
+
+		$tokens = preg_split( '/[\s,]+/', strtolower( (string) $robots ), -1, PREG_SPLIT_NO_EMPTY );
+		if ( ! is_array( $tokens ) ) {
+			return $flags;
+		}
+
+		foreach ( $tokens as $token ) {
+			if ( 'none' === $token ) {
+				$flags['noindex']  = true;
+				$flags['nofollow'] = true;
+			} elseif ( 'noindex' === $token ) {
+				$flags['noindex'] = true;
+			} elseif ( 'nofollow' === $token ) {
+				$flags['nofollow'] = true;
+			}
+		}
+
+		return $flags;
 	}
 
 	/**
@@ -467,6 +697,113 @@ class Temso_Publisher {
 			if ( $rank_math ) {
 				update_post_meta( $post_id, $keys['rank_math'], $seo[ $field ] );
 			}
+		}
+
+		// Open Graph, Twitter, and robots live under plugin-specific keys.
+		if ( $yoast ) {
+			$this->write_yoast_extended_meta( $post_id, $seo );
+		}
+		if ( $rank_math ) {
+			$this->write_rank_math_extended_meta( $post_id, $seo );
+		}
+	}
+
+	/**
+	 * Write Yoast Open Graph, Twitter, and robots post meta.
+	 *
+	 * Yoast keeps each surface under its own meta key and stores robots
+	 * noindex/nofollow as separate per-post flags. Only set fields are written so
+	 * an unset directive keeps Yoast's default behaviour.
+	 *
+	 * @param int   $post_id Target post ID.
+	 * @param array $seo     Sanitized SEO fields.
+	 */
+	private function write_yoast_extended_meta( $post_id, array $seo ) {
+		$open_graph = isset( $seo['openGraph'] ) ? $seo['openGraph'] : array();
+		if ( ! empty( $open_graph['title'] ) ) {
+			update_post_meta( $post_id, '_yoast_wpseo_opengraph-title', $open_graph['title'] );
+		}
+		if ( ! empty( $open_graph['description'] ) ) {
+			update_post_meta( $post_id, '_yoast_wpseo_opengraph-description', $open_graph['description'] );
+		}
+		if ( ! empty( $open_graph['imageUrl'] ) ) {
+			update_post_meta( $post_id, '_yoast_wpseo_opengraph-image', $open_graph['imageUrl'] );
+		}
+
+		$twitter = isset( $seo['twitter'] ) ? $seo['twitter'] : array();
+		if ( ! empty( $twitter['title'] ) ) {
+			update_post_meta( $post_id, '_yoast_wpseo_twitter-title', $twitter['title'] );
+		}
+		if ( ! empty( $twitter['description'] ) ) {
+			update_post_meta( $post_id, '_yoast_wpseo_twitter-description', $twitter['description'] );
+		}
+		if ( ! empty( $twitter['imageUrl'] ) ) {
+			update_post_meta( $post_id, '_yoast_wpseo_twitter-image', $twitter['imageUrl'] );
+		}
+
+		// robots is authoritative when present: write a definitive value for both
+		// flags so a prior noindex/nofollow is cleared on re-publish ( '0' = default ).
+		if ( isset( $seo['robots'] ) ) {
+			$robots = $seo['robots'];
+			update_post_meta( $post_id, '_yoast_wpseo_meta-robots-noindex', ! empty( $robots['noindex'] ) ? '1' : '0' );
+			update_post_meta( $post_id, '_yoast_wpseo_meta-robots-nofollow', ! empty( $robots['nofollow'] ) ? '1' : '0' );
+		}
+	}
+
+	/**
+	 * Write Rank Math Open Graph, Twitter, and robots post meta.
+	 *
+	 * Rank Math reuses the Facebook/OG values for Twitter unless told otherwise,
+	 * so providing any Twitter field opts the post into custom Twitter data.
+	 * Robots directives are stored as an array; only constrained directives are
+	 * written so an unset directive keeps Rank Math's default.
+	 *
+	 * @param int   $post_id Target post ID.
+	 * @param array $seo     Sanitized SEO fields.
+	 */
+	private function write_rank_math_extended_meta( $post_id, array $seo ) {
+		$open_graph = isset( $seo['openGraph'] ) ? $seo['openGraph'] : array();
+		if ( ! empty( $open_graph['title'] ) ) {
+			update_post_meta( $post_id, 'rank_math_facebook_title', $open_graph['title'] );
+		}
+		if ( ! empty( $open_graph['description'] ) ) {
+			update_post_meta( $post_id, 'rank_math_facebook_description', $open_graph['description'] );
+		}
+		if ( ! empty( $open_graph['imageUrl'] ) ) {
+			update_post_meta( $post_id, 'rank_math_facebook_image', $open_graph['imageUrl'] );
+		}
+
+		$twitter     = isset( $seo['twitter'] ) ? $seo['twitter'] : array();
+		$has_twitter = ! empty( $twitter['title'] ) || ! empty( $twitter['description'] )
+			|| ! empty( $twitter['imageUrl'] ) || ! empty( $twitter['card'] );
+		if ( $has_twitter ) {
+			// Without this Rank Math mirrors the Facebook/OG values for Twitter.
+			update_post_meta( $post_id, 'rank_math_twitter_use_facebook', 'off' );
+		}
+		if ( ! empty( $twitter['title'] ) ) {
+			update_post_meta( $post_id, 'rank_math_twitter_title', $twitter['title'] );
+		}
+		if ( ! empty( $twitter['description'] ) ) {
+			update_post_meta( $post_id, 'rank_math_twitter_description', $twitter['description'] );
+		}
+		if ( ! empty( $twitter['imageUrl'] ) ) {
+			update_post_meta( $post_id, 'rank_math_twitter_image', $twitter['imageUrl'] );
+		}
+		if ( ! empty( $twitter['card'] ) ) {
+			// Rank Math card slugs differ from the payload's: summary -> summary_card.
+			$card = 'summary' === $twitter['card'] ? 'summary_card' : 'summary_large_image';
+			update_post_meta( $post_id, 'rank_math_twitter_card_type', $card );
+		}
+
+		// robots is authoritative when present: write the full directive array so a
+		// prior noindex is overwritten by index on re-publish.
+		if ( isset( $seo['robots'] ) ) {
+			$robots     = $seo['robots'];
+			$directives = array( ! empty( $robots['noindex'] ) ? 'noindex' : 'index' );
+			if ( ! empty( $robots['nofollow'] ) ) {
+				$directives[] = 'nofollow';
+			}
+			update_post_meta( $post_id, 'rank_math_robots', $directives );
 		}
 	}
 

@@ -56,6 +56,7 @@ if ( file_exists( TEMSO_PATH . 'includes/class-temso-updater.php' ) ) {
 }
 // temso:wporg-exclude-end.
 require_once TEMSO_PATH . 'includes/class-temso-plugin.php';
+require_once TEMSO_PATH . 'includes/class-temso-media.php';
 require_once TEMSO_PATH . 'includes/class-temso-publisher.php';
 
 register_deactivation_hook(

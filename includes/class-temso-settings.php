@@ -33,6 +33,19 @@ class Temso_Settings {
 	const DEVELOPMENT_CLAIM_URL = 'https://api.development.temso.ai/v1/integrations/wordpress/setup-claim';
 
 	/**
+	 * Timeout (seconds) for the claim round-trip.
+	 *
+	 * The budget has to cover the whole handshake, not just our POST: Temso calls
+	 * back to this site's /capabilities endpoint to verify it before answering, so
+	 * a cold site (PHP/opcache cold, plugins loading) is hit twice in series. The
+	 * default 5s — and even the previous 15s — could time out on that first cold
+	 * claim and report a `network` error even though Temso had already saved the
+	 * connection. Kept under the common 30s PHP max_execution_time, since this runs
+	 * inside an admin-ajax request.
+	 */
+	const CLAIM_TIMEOUT_SECONDS = 25;
+
+	/**
 	 * Current settings, with defaults applied.
 	 *
 	 * @return array{enabled:bool,ingest_url:string,api_key:string,publish_secret:string,publishing_connected_at:int,publishing_site_url:string,publishing_rest_base_url:string}
@@ -233,9 +246,15 @@ class Temso_Settings {
 		}
 		check_ajax_referer( self::AJAX_CONNECT_PUBLISHING_ACTION, 'nonce' );
 
-		$raw = isset( $_POST['setup'] )
-			? sanitize_text_field( wp_unslash( $_POST['setup'] ) )
-			: '';
+		// The paste is a one-time setup URL or a bare token. It must NOT go through
+		// sanitize_text_field(): that strips every %xx octet, which mangles the
+		// percent-encoded claim_url carried in the setup URL's query string. The dev
+		// claim_url would then fail trusted_claim_url(), the claim would fall back to
+		// the production endpoint, and a development setup token would come back as
+		// invalid_token. parse_setup() sanitizes the extracted token and hard-
+		// allowlists the claim_url, so trimming the unslashed paste is safe here.
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- See note above; the extracted token is sanitized and the claim_url is allowlisted in parse_setup().
+		$raw = isset( $_POST['setup'] ) ? trim( wp_unslash( $_POST['setup'] ) ) : '';
 
 		$setup = self::parse_setup( $raw );
 		$token = $setup['token'];
@@ -286,10 +305,11 @@ class Temso_Settings {
 			);
 		}
 
-		// Not a URL — treat the whole paste as the token verbatim.
+		// Not a URL — treat the whole paste as the token. A bare token never
+		// carries a nested claim_url, so sanitize_text_field() is safe here.
 		if ( ! preg_match( '#^https?://#i', $raw ) ) {
 			return array(
-				'token'     => $raw,
+				'token'     => sanitize_text_field( $raw ),
 				'claim_url' => '',
 			);
 		}
@@ -307,7 +327,9 @@ class Temso_Settings {
 		$token = '';
 		foreach ( array( 'wordpress_setup', 'setup_token', 'setupToken', 'token' ) as $key ) {
 			if ( ! empty( $params[ $key ] ) && is_string( $params[ $key ] ) ) {
-				$token = trim( $params[ $key ] );
+				// wp_parse_str() already URL-decoded the value; the token has no
+				// %xx octets of its own, so sanitize_text_field() cannot corrupt it.
+				$token = sanitize_text_field( $params[ $key ] );
 				break;
 			}
 		}
@@ -430,7 +452,7 @@ class Temso_Settings {
 		$response = wp_remote_post(
 			self::claim_url( $claim_url ),
 			array(
-				'timeout'   => 15,
+				'timeout'   => self::CLAIM_TIMEOUT_SECONDS,
 				'sslverify' => true,
 				'headers'   => array(
 					'Content-Type' => 'application/json',
