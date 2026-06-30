@@ -109,8 +109,6 @@ class Temso_Media {
 			return null;
 		}
 
-		$this->load_dependencies();
-
 		$attachment = $this->sideload(
 			$featured_image['url'],
 			0,
@@ -159,7 +157,6 @@ class Temso_Media {
 			);
 		}
 
-		$this->load_dependencies();
 		$new_html = $this->rehost_inline_images( (string) $html, $post_id );
 
 		return array(
@@ -354,6 +351,18 @@ class Temso_Media {
 				);
 			}
 			// Stored attachment is broken; fall through and re-sideload.
+		}
+
+		// WordPress's media-handling helpers (download_url, media_handle_sideload,
+		// wp_read_image_metadata) live in wp-admin/includes and are not loaded in
+		// the front-end REST context this endpoint runs in, so pull them in on
+		// demand. Mirrors Temso_Cache_Detect's load of wp-admin/includes/plugin.php
+		// and WordPress's own documented sideload recipe; require_once is keyed on
+		// the resolved path, so an already-loaded admin context is a no-op.
+		if ( ! function_exists( 'media_handle_sideload' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			require_once ABSPATH . 'wp-admin/includes/media.php';
+			require_once ABSPATH . 'wp-admin/includes/image.php';
 		}
 
 		$tmp = download_url( $url, self::DOWNLOAD_TIMEOUT );
@@ -567,25 +576,6 @@ class Temso_Media {
 	private static function cleanup_temp( $path ) {
 		if ( is_string( $path ) && '' !== $path && function_exists( 'wp_delete_file' ) ) {
 			wp_delete_file( $path );
-		}
-	}
-
-	/**
-	 * Pull in the WordPress media-handling helpers, which are admin-only.
-	 *
-	 * The publish endpoint runs in a REST (front-end) context where these files
-	 * are not loaded, so they are required on demand. Guarded by function_exists
-	 * so a stubbed test environment is left alone.
-	 */
-	private function load_dependencies() {
-		if ( ! function_exists( 'download_url' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/file.php';
-		}
-		if ( ! function_exists( 'media_handle_sideload' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/media.php';
-		}
-		if ( ! function_exists( 'wp_read_image_metadata' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/image.php';
 		}
 	}
 
