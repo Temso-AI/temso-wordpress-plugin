@@ -135,6 +135,10 @@ final class PublisherTest extends TestCase {
 				return (int) $value;
 			}
 		);
+		// contentId is required, so every create resolves its idempotency lookup.
+		// Default to "no existing post" (a fresh insert); tests that exercise the
+		// retry/dedup path override this to return an existing post id.
+		Functions\when( 'get_posts' )->justReturn( array() );
 	}
 
 	protected function tearDown(): void {
@@ -158,7 +162,15 @@ final class PublisherTest extends TestCase {
 		return 'sha256=' . hash_hmac( 'sha256', $timestamp . '.' . $nonce . '.' . $body, $secret );
 	}
 
-	private function encode( array $data ): string {
+	/**
+	 * Encode a publish request body, defaulting in the now-required contentId so
+	 * tests that don't exercise idempotency stay focused on their own concern.
+	 * Pass an explicit contentId (including a non-string) to override.
+	 */
+	private function publish_body( array $data ): string {
+		if ( ! array_key_exists( 'contentId', $data ) ) {
+			$data['contentId'] = 'pub-default-0001';
+		}
 		return json_encode( $data );
 	}
 
@@ -187,27 +199,8 @@ final class PublisherTest extends TestCase {
 
 		$this->assertSame( TEMSO_VERSION, $caps['pluginVersion'] );
 		$this->assertArrayHasKey( 'publish', $caps['features'] );
-		$this->assertArrayHasKey( 'media', $caps['features'] );
 		$this->assertArrayHasKey( 'yoastMeta', $caps['features'] );
 		$this->assertArrayHasKey( 'rankMathMeta', $caps['features'] );
-	}
-
-	public function test_capabilities_reports_media_true(): void {
-		$this->stub_secret( 'a-configured-shared-secret-0001' );
-
-		$caps = ( new Temso_Publisher() )->capabilities();
-
-		// media is a static code capability, advertised regardless of the secret.
-		$this->assertTrue( $caps['features']['media'] );
-	}
-
-	public function test_capabilities_reports_media_true_without_secret(): void {
-		$this->stub_secret( '' );
-
-		$caps = ( new Temso_Publisher() )->capabilities();
-
-		$this->assertTrue( $caps['features']['media'] );
-		$this->assertFalse( $caps['features']['publish'] );
 	}
 
 	public function test_capabilities_reports_publish_false_without_secret(): void {
@@ -359,7 +352,7 @@ final class PublisherTest extends TestCase {
 		Functions\when( 'update_post_meta' )->justReturn( true );
 		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/the-slug/' );
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>Body</p>',
 				'title'       => 'Title',
@@ -390,7 +383,7 @@ final class PublisherTest extends TestCase {
 		Functions\when( 'update_post_meta' )->justReturn( true );
 		Functions\when( 'get_permalink' )->justReturn( '' );
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -418,7 +411,7 @@ final class PublisherTest extends TestCase {
 		Functions\when( 'update_post_meta' )->justReturn( true );
 		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/s/' );
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -452,7 +445,7 @@ final class PublisherTest extends TestCase {
 		Functions\when( 'update_post_meta' )->justReturn( true );
 		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/?p=55' );
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -485,7 +478,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -512,7 +505,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -534,7 +527,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -555,6 +548,218 @@ final class PublisherTest extends TestCase {
 	}
 
 	/* ----------------------------------------------------------------- *
+	 * Idempotent create (contentId)
+	 * ----------------------------------------------------------------- */
+
+	public function test_create_with_content_id_stores_idempotency_meta(): void {
+		$meta = array();
+		// No prior post carries this contentId, so a fresh create happens.
+		Functions\when( 'get_posts' )->justReturn( array() );
+		Functions\when( 'wp_insert_post' )->justReturn( 123 );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/s/' );
+		Functions\when( 'update_post_meta' )->alias(
+			static function ( $post_id, $key, $value ) use ( &$meta ) {
+				$meta[ $key ] = array( $post_id, $value );
+				return true;
+			}
+		);
+
+		$body = $this->publish_body(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'contentId'   => 'pub-abc-123',
+			)
+		);
+
+		$result = ( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( '123', $result['externalId'] );
+		// The contentId is recorded on the new post so a future retry can find it.
+		$this->assertArrayHasKey( '_temso_content_id', $meta );
+		$this->assertSame( array( 123, 'pub-abc-123' ), $meta['_temso_content_id'] );
+	}
+
+	public function test_retried_create_with_known_content_id_updates_instead_of_inserting(): void {
+		// The bug scenario: the first create succeeded (post 500) but Temso never
+		// got the response, so it retries the same create — fresh nonce, same
+		// contentId, still no externalId. The plugin must update post 500, not
+		// insert a duplicate.
+		$insert_called = false;
+		$updated       = null;
+		Functions\when( 'get_posts' )->justReturn( array( 500 ) );
+		Functions\when( 'wp_insert_post' )->alias(
+			static function () use ( &$insert_called ) {
+				$insert_called = true;
+				return 999;
+			}
+		);
+		Functions\when( 'wp_update_post' )->alias(
+			static function ( $postarr ) use ( &$updated ) {
+				$updated = $postarr;
+				return 500;
+			}
+		);
+		Functions\when( 'update_post_meta' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/s/' );
+
+		$body = $this->publish_body(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'contentId'   => 'pub-abc-123',
+			)
+		);
+
+		$result = ( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertFalse( $insert_called, 'A retried create with a known contentId must not insert a duplicate.' );
+		$this->assertSame( 500, $updated['ID'] );
+		$this->assertSame( '500', $result['externalId'] );
+	}
+
+	public function test_external_id_update_takes_precedence_over_content_id(): void {
+		// When externalId is present it is authoritative; contentId is not consulted
+		// (no get_posts lookup) and the named post is updated.
+		$lookup_called = false;
+		$updated       = null;
+		Functions\when( 'get_posts' )->alias(
+			static function () use ( &$lookup_called ) {
+				$lookup_called = true;
+				return array( 777 );
+			}
+		);
+		Functions\when( 'get_post' )->alias(
+			static function ( $id ) {
+				return (object) array(
+					'ID'        => $id,
+					'post_type' => 'post',
+				);
+			}
+		);
+		Functions\when( 'wp_update_post' )->alias(
+			static function ( $postarr ) use ( &$updated ) {
+				$updated = $postarr;
+				return 55;
+			}
+		);
+		Functions\when( 'update_post_meta' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/s/' );
+
+		$body = $this->publish_body(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'externalId'  => '55',
+				'contentId'   => 'pub-abc-123',
+			)
+		);
+
+		$result = ( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertSame( 55, $updated['ID'] );
+		$this->assertSame( '55', $result['externalId'] );
+		$this->assertFalse( $lookup_called, 'externalId must not trigger a contentId lookup.' );
+	}
+
+	public function test_publish_rejects_missing_content_id(): void {
+		// contentId is required (the backend always sends it); a body without it is
+		// a 400 rather than a silently non-idempotent create. json_encode directly
+		// to bypass the helper's default injection.
+		$body = json_encode(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+			)
+		);
+
+		$this->assert_error_code(
+			'temso_publish_invalid_payload',
+			( new Temso_Publisher() )->publish( $this->request( $body, array() ) )
+		);
+	}
+
+	public function test_publish_rejects_non_string_content_id(): void {
+		$body = $this->publish_body(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'contentId'   => array( 'not', 'a', 'string' ),
+			)
+		);
+
+		$this->assert_error_code(
+			'temso_publish_invalid_payload',
+			( new Temso_Publisher() )->publish( $this->request( $body, array() ) )
+		);
+	}
+
+	public function test_publish_rejects_content_id_that_sanitizes_to_empty(): void {
+		// Non-empty raw but sanitizes to '' (e.g. a tag-only value): must be rejected,
+		// not stored as an empty idempotency key that later empty payloads could match.
+		Functions\when( 'sanitize_text_field' )->alias(
+			static function ( $value ) {
+				return '<x>' === $value ? '' : $value;
+			}
+		);
+
+		$body = $this->publish_body(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+				'contentId'   => '<x>',
+			)
+		);
+
+		$this->assert_error_code(
+			'temso_publish_invalid_payload',
+			( new Temso_Publisher() )->publish( $this->request( $body, array() ) )
+		);
+	}
+
+	public function test_content_id_lookup_includes_trashed_posts(): void {
+		// The idempotency lookup must find a prior create even if it was trashed, so
+		// it stays consistent with the externalId update path (which revives a
+		// trashed post) and never duplicates on a retry after a trash.
+		$captured = null;
+		Functions\when( 'get_posts' )->alias(
+			static function ( $args ) use ( &$captured ) {
+				$captured = $args;
+				return array();
+			}
+		);
+		Functions\when( 'wp_insert_post' )->justReturn( 123 );
+		Functions\when( 'update_post_meta' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/s/' );
+
+		$body = $this->publish_body(
+			array(
+				'html'        => '<p>x</p>',
+				'title'       => 'T',
+				'slug'        => 's',
+				'targetState' => 'published',
+			)
+		);
+
+		( new Temso_Publisher() )->publish( $this->request( $body, array() ) );
+
+		$this->assertIsArray( $captured );
+		$this->assertContains( 'trash', (array) $captured['post_status'] );
+	}
+
+	/* ----------------------------------------------------------------- *
 	 * SEO metadata
 	 * ----------------------------------------------------------------- */
 
@@ -569,7 +774,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -601,7 +806,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -633,7 +838,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -679,7 +884,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -727,7 +932,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -757,7 +962,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<p>x</p>',
 				'title'       => 'T',
@@ -816,7 +1021,7 @@ final class PublisherTest extends TestCase {
 		);
 		$this->stub_media( 88, 'https://example.com/wp-content/uploads/cover.webp' );
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<!-- wp:image --><figure class="wp-block-image"><img src="https://storage.googleapis.com/temso-public-prod/cover.webp" alt="c"/></figure><!-- /wp:image -->',
 				'title'       => 'T',
@@ -844,7 +1049,7 @@ final class PublisherTest extends TestCase {
 		// Simulate the content update failing.
 		Functions\when( 'wp_update_post' )->justReturn( 0 );
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<img src="https://storage.googleapis.com/temso-public-prod/cover.webp" alt="c"/>',
 				'title'       => 'T',
@@ -884,7 +1089,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<img src="https://storage.googleapis.com/temso-public-prod/cover.webp" alt="c"/>',
 				'title'       => 'T',
@@ -922,7 +1127,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'        => '<img src="https://cdn.example.com/third-party.jpg" alt="x"/>',
 				'title'       => 'T',
@@ -959,7 +1164,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'          => '<p>No inline images.</p>',
 				'title'         => 'T',
@@ -991,7 +1196,7 @@ final class PublisherTest extends TestCase {
 		// Featured download fails: a transient error the backend should retry.
 		Functions\when( 'download_url' )->justReturn( new WP_Error( 'http_request_failed', 'boom' ) );
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'          => '<p>x</p>',
 				'title'         => 'T',
@@ -1013,7 +1218,7 @@ final class PublisherTest extends TestCase {
 	}
 
 	public function test_publish_rejects_non_object_featured_image(): void {
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'          => '<p>x</p>',
 				'title'         => 'T',
@@ -1030,7 +1235,7 @@ final class PublisherTest extends TestCase {
 	}
 
 	public function test_publish_rejects_featured_image_without_url(): void {
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'          => '<p>x</p>',
 				'title'         => 'T',
@@ -1057,7 +1262,7 @@ final class PublisherTest extends TestCase {
 			}
 		);
 
-		$body = $this->encode(
+		$body = $this->publish_body(
 			array(
 				'html'          => '<p>x</p>',
 				'title'         => 'T',

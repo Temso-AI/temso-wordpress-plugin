@@ -34,6 +34,18 @@ class Temso_Publisher {
 	const NONCE_TRANSIENT_PREFIX = 'temso_publish_nonce_';
 
 	/**
+	 * Post meta key holding Temso's stable idempotency id for a created post.
+	 *
+	 * Written on create so a retried create — one whose success response Temso
+	 * never received, so the retry still carries no externalId — resolves back to
+	 * the same post and updates it instead of inserting a duplicate. The nonce
+	 * cannot serve this role: it is unique per request (a retry re-signs with a
+	 * fresh nonce), whereas this key is stable across every retry of the same
+	 * logical publish.
+	 */
+	const CONTENT_ID_META = '_temso_content_id';
+
+	/**
 	 * Register the REST routes on `rest_api_init`.
 	 */
 	public function boot() {
@@ -94,19 +106,12 @@ class Temso_Publisher {
 	 * it is answering an inbound capabilities request or describing itself in a
 	 * claim payload. `publish` is true exactly when a secret is configured.
 	 *
-	 * `media` is a static code capability (inline image sideloading + featured
-	 * image), so it is reported unconditionally — unlike `publish`, it does not
-	 * depend on a secret being configured. The backend keys off it to decide
-	 * whether to send `featuredImage` and expect Temso-bucket images to be
-	 * rehosted.
-	 *
 	 * @param string $secret Configured publish shared secret ('' when unset).
-	 * @return array{publish:bool,media:bool,yoastMeta:bool,rankMathMeta:bool}
+	 * @return array{publish:bool,yoastMeta:bool,rankMathMeta:bool}
 	 */
 	public static function capability_features( $secret ) {
 		return array(
 			'publish'      => '' !== (string) $secret,
-			'media'        => true,
 			'yoastMeta'    => self::is_yoast_active(),
 			'rankMathMeta' => self::is_rank_math_active(),
 		);
@@ -289,8 +294,8 @@ class Temso_Publisher {
 			);
 		}
 
-		// html, title, slug, and targetState are required non-empty strings.
-		foreach ( array( 'html', 'title', 'slug', 'targetState' ) as $field ) {
+		// html, title, slug, targetState, and contentId are required non-empty strings.
+		foreach ( array( 'html', 'title', 'slug', 'targetState', 'contentId' ) as $field ) {
 			if ( ! isset( $data[ $field ] ) || ! is_string( $data[ $field ] ) || '' === trim( $data[ $field ] ) ) {
 				return new WP_Error(
 					'temso_publish_invalid_payload',
@@ -332,6 +337,29 @@ class Temso_Publisher {
 			}
 		}
 
+		// contentId is Temso's stable idempotency key, sent on every request (create
+		// and update). On a create it is stored as post meta so a retried create —
+		// which still has no externalId, because Temso never got the first response —
+		// resolves back to the same post instead of inserting a duplicate. The raw
+		// value passed the required-field check above, but must be re-checked after
+		// sanitizing: a value that sanitizes to '' would otherwise be stored as an
+		// empty key that later empty-sanitizing payloads could match and clobber.
+		$content_id = sanitize_text_field( $data['contentId'] );
+		if ( '' === $content_id ) {
+			return new WP_Error(
+				'temso_publish_invalid_payload',
+				'Missing or invalid field: contentId.',
+				array( 'status' => 400 )
+			);
+		}
+		if ( strlen( $content_id ) > 191 ) {
+			return new WP_Error(
+				'temso_publish_invalid_payload',
+				'contentId must be 191 characters or fewer.',
+				array( 'status' => 400 )
+			);
+		}
+
 		$seo = $this->parse_seo( isset( $data['seo'] ) ? $data['seo'] : null );
 		if ( is_wp_error( $seo ) ) {
 			return $seo;
@@ -350,6 +378,7 @@ class Temso_Publisher {
 			'html'           => wp_kses_post( $data['html'] ),
 			'status'         => 'published' === $data['targetState'] ? 'publish' : 'draft',
 			'external_id'    => $external_id,
+			'content_id'     => $content_id,
 			'seo'            => $seo,
 			'featured_image' => $featured_image,
 		);
@@ -593,8 +622,18 @@ class Temso_Publisher {
 	/**
 	 * Create a new post, or update the existing one named by externalId.
 	 *
-	 * A missing or wrong-type update target is an error, never a silent create —
-	 * that would duplicate posts after a stale Temso record or a deleted post.
+	 * Target resolution:
+	 *  1. externalId present  — update that post. A missing or wrong-type target is
+	 *     an error, never a silent create, which would duplicate posts after a
+	 *     stale Temso record or a deleted post.
+	 *  2. no externalId but a known contentId — update the post already created for
+	 *     that key. This is the idempotent-retry case: the first create succeeded
+	 *     but its response never reached Temso, so the retry carries the same
+	 *     contentId (and still no externalId) and must reuse, not duplicate.
+	 *  3. otherwise — insert a new post.
+	 *
+	 * The resulting post records its contentId (CONTENT_ID_META) so a later retried
+	 * create can find it.
 	 *
 	 * @param array $payload Sanitized payload from parse_payload().
 	 * @return int|WP_Error New/updated post ID, or an error.
@@ -608,9 +647,7 @@ class Temso_Publisher {
 			'post_content' => $payload['html'],
 		);
 
-		if ( null === $payload['external_id'] ) {
-			$result = wp_insert_post( $postarr, true );
-		} else {
+		if ( null !== $payload['external_id'] ) {
 			$post_id  = (int) $payload['external_id'];
 			$existing = $post_id > 0 ? get_post( $post_id ) : null;
 
@@ -632,6 +669,22 @@ class Temso_Publisher {
 
 			$postarr['ID'] = $post_id;
 			$result        = wp_update_post( $postarr, true );
+		} else {
+			// No externalId: look up a post already created for this contentId. A
+			// hit is the idempotent-retry case (the first create's response never
+			// reached Temso) — update that post rather than insert a duplicate.
+			// Temso serializes pushes per publication (contentId is the publication
+			// id, claimed before each send) and spaces retries minutes apart, so two
+			// creates with the same contentId never run concurrently; this
+			// lookup-then-insert therefore needs no cross-request lock.
+			$reused = self::find_post_by_content_id( $payload['content_id'] );
+
+			if ( $reused > 0 ) {
+				$postarr['ID'] = $reused;
+				$result        = wp_update_post( $postarr, true );
+			} else {
+				$result = wp_insert_post( $postarr, true );
+			}
 		}
 
 		if ( is_wp_error( $result ) ) {
@@ -651,7 +704,45 @@ class Temso_Publisher {
 			);
 		}
 
+		update_post_meta( $post_id, self::CONTENT_ID_META, $payload['content_id'] );
+
 		return $post_id;
+	}
+
+	/**
+	 * Find the post previously created for a given Temso contentId.
+	 *
+	 * Exact-match lookup on CONTENT_ID_META across every post status — including
+	 * trash — so a retried create resolves to the post the first attempt made
+	 * whatever state it is in. Trash is deliberately included: the externalId update
+	 * path already resolves (and revives) a trashed post via get_post(), so this
+	 * path must match, or a retried create after a trash would insert a duplicate
+	 * instead of reusing. 'any' omits trash, hence the explicit status list.
+	 * Returns 0 when none exists.
+	 *
+	 * @param string $content_id Idempotency key stored in CONTENT_ID_META.
+	 * @return int Post ID, or 0.
+	 */
+	private static function find_post_by_content_id( $content_id ) {
+		$ids = get_posts(
+			array(
+				'post_type'              => 'post',
+				'post_status'            => array( 'publish', 'draft', 'pending', 'future', 'private', 'trash' ),
+				'numberposts'            => 1,
+				'fields'                 => 'ids',
+				'no_found_rows'          => true,
+				'update_post_term_cache' => false,
+				'update_post_meta_cache' => false,
+				'meta_query'             => array( // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Exact-match idempotency lookup on our own meta key; required to dedupe retried creates.
+					array(
+						'key'   => self::CONTENT_ID_META,
+						'value' => (string) $content_id,
+					),
+				),
+			)
+		);
+
+		return ( is_array( $ids ) && ! empty( $ids ) ) ? (int) $ids[0] : 0;
 	}
 
 	/**

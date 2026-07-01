@@ -548,6 +548,12 @@ class Temso_Media {
 	/**
 	 * A safe upload filename derived from the source URL.
 	 *
+	 * The name need not be unique. Dedup keys on the source URL (SOURCE_URL_META),
+	 * not the filename, and media_handle_sideload() runs this name through
+	 * wp_unique_filename(), so two distinct URLs that share a basename (or both fall
+	 * back to the default) become separate attachments — cover.jpg and cover-1.jpg —
+	 * rather than collapsing onto one.
+	 *
 	 * @param string $url Source URL (already validated to an allowed extension).
 	 * @return string
 	 */
@@ -555,10 +561,11 @@ class Temso_Media {
 		$path = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$name = sanitize_file_name( wp_basename( $path ) );
 
-		// wp_basename strips the directory; guarantee a non-empty, typed name.
+		// wp_basename strips the directory; guarantee a non-empty, typed name. The
+		// extension is already validated non-empty before any sideload (the
+		// allowed_extension() gate in sideload()), so it is always present here.
 		if ( '' === $name || false === strpos( $name, '.' ) ) {
-			$ext  = self::allowed_extension( $url );
-			$name = 'temso-image' . ( '' !== $ext ? '.' . $ext : '' );
+			$name = 'temso-image.' . self::allowed_extension( $url );
 		}
 
 		return $name;
@@ -568,13 +575,12 @@ class Temso_Media {
 	 * Delete the leftover temp download after a failed sideload.
 	 *
 	 * On failure media_handle_sideload leaves the temp file in place, so the
-	 * caller cleans up. wp_delete_file is always loaded in a real request; the
-	 * guard simply keeps a stubbed test environment happy.
+	 * caller cleans up. wp_delete_file lives in wp-includes and is always loaded.
 	 *
 	 * @param string $path Temp file path from download_url().
 	 */
 	private static function cleanup_temp( $path ) {
-		if ( is_string( $path ) && '' !== $path && function_exists( 'wp_delete_file' ) ) {
+		if ( is_string( $path ) && '' !== $path ) {
 			wp_delete_file( $path );
 		}
 	}
