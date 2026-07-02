@@ -56,6 +56,8 @@ if ( file_exists( TEMSO_PATH . 'includes/class-temso-updater.php' ) ) {
 }
 // temso:wporg-exclude-end.
 require_once TEMSO_PATH . 'includes/class-temso-plugin.php';
+require_once TEMSO_PATH . 'includes/class-temso-media.php';
+require_once TEMSO_PATH . 'includes/class-temso-publisher.php';
 
 register_deactivation_hook(
 	__FILE__,
@@ -68,6 +70,10 @@ add_action(
 	'plugins_loaded',
 	static function () {
 		( new Temso_Plugin() )->boot();
+		// Publishing is an inbound, server-to-server API authenticated by a
+		// shared secret — it must work regardless of the traffic-tracking
+		// checkbox or whether we are in wp-admin.
+		( new Temso_Publisher() )->boot();
 		// temso:wporg-exclude-start.
 		if ( class_exists( 'Temso_Updater' ) ) {
 			( new Temso_Updater() )->boot();
