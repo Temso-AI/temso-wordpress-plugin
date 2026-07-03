@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v1.0.1...v1.1.0) (2026-07-03)
+
+
+### Features
+
+* add temso content publisher v1 ([7761b23](https://github.com/Temso-AI/temso-wordpress-plugin/commit/7761b2377e45713bcc688a36966a87c3f3cb5be3))
+* add temso content publisher v1 ([7761b23](https://github.com/Temso-AI/temso-wordpress-plugin/commit/7761b2377e45713bcc688a36966a87c3f3cb5be3))
+* add temso content publisher v1 ([23e814c](https://github.com/Temso-AI/temso-wordpress-plugin/commit/23e814c3428c65203aa0c4357dec24768d2abfea))
+
 ## [1.0.1](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v1.0.0...v1.0.1) (2026-06-10)
 
 

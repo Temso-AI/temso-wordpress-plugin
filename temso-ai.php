@@ -4,7 +4,7 @@
  * Plugin URI:        https://github.com/Temso-AI/temso-wordpress-plugin
  * Description:        Captures front-end requests at your WordPress origin and streams them to Temso so AI-crawler and bot traffic shows up in your Temso dashboard. No CDN, theme, or code changes.
  * x-release-please-start-version
- * Version:           1.0.1
+ * Version:           1.1.0
  * x-release-please-end
  * Requires at least: 6.0
  * Requires PHP:      7.4
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'TEMSO_VERSION', '1.0.1' ); // x-release-please-version.
+define( 'TEMSO_VERSION', '1.1.0' ); // x-release-please-version.
 define( 'TEMSO_FILE', __FILE__ );
 define( 'TEMSO_PATH', plugin_dir_path( __FILE__ ) );
 
