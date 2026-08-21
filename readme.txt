@@ -2,7 +2,7 @@
 Contributors: temsoai
 Tags: analytics, bots, crawlers, ai, logs
 Requires at least: 6.0
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 7.4
 Stable tag: 1.1.0
 License: GPLv2 or later
@@ -32,7 +32,7 @@ Requests served from full-page cache never reach PHP, so no origin plugin can ca
 1. Install and activate the plugin.
 2. Open **Settings → Temso**.
 3. Paste the **Ingest URL** and **API key** from your Temso project (Crawlers → Add source → WordPress).
-4. Make sure **Tracking** is enabled and save.
+4. Save. **Tracking** is on by default, so that is all it takes — uncheck it any time to pause sending.
 
 To enable publishing (optional): in Temso open **Settings → Integrations → WordPress**, generate a one-time setup link, then paste it into the **Publishing** section of **Settings → Temso** and click **Connect publishing**. This is separate from traffic ingest — the ingest API key is never used for publishing.
 

@@ -48,6 +48,13 @@ class Temso_Settings {
 	/**
 	 * Current settings, with defaults applied.
 	 *
+	 * `enabled` defaults to true: installing the plugin is the statement of
+	 * intent, and admins routinely paste their credentials and forget the
+	 * checkbox. An explicitly saved value — including false — always wins, so
+	 * the key's presence, not its truthiness, is what distinguishes "the admin
+	 * turned tracking off" from "the admin has never chosen". Nothing is sent
+	 * until an ingest URL and API key are configured either way.
+	 *
 	 * @return array{enabled:bool,ingest_url:string,api_key:string,publish_secret:string,publishing_connected_at:int,publishing_site_url:string,publishing_rest_base_url:string}
 	 */
 	public static function get() {
@@ -57,7 +64,7 @@ class Temso_Settings {
 		}
 
 		return array(
-			'enabled'                  => ! empty( $saved['enabled'] ),
+			'enabled'                  => array_key_exists( 'enabled', $saved ) ? ! empty( $saved['enabled'] ) : true,
 			'ingest_url'               => isset( $saved['ingest_url'] ) ? (string) $saved['ingest_url'] : '',
 			'api_key'                  => isset( $saved['api_key'] ) ? (string) $saved['api_key'] : '',
 			'publish_secret'           => isset( $saved['publish_secret'] ) ? (string) $saved['publish_secret'] : '',
@@ -576,6 +583,28 @@ class Temso_Settings {
 	}
 
 	/**
+	 * Whether the current write is a submission of this plugin's settings form.
+	 *
+	 * WordPress runs this sanitizer on every update_option() for the option, so
+	 * a form save and a programmatic write are otherwise indistinguishable — and
+	 * they mean opposite things when a checkbox key is missing. options.php
+	 * verifies its own nonce and capability before calling
+	 * the sanitizer, and `option_page` is only read to identify the request
+	 * shape; no posted value is taken from it.
+	 *
+	 * @return bool
+	 */
+	private static function is_settings_form_submission() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Not consuming input: options.php already verified the nonce for this option group before invoking this sanitizer.
+		if ( ! isset( $_POST['option_page'] ) ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- See above.
+		return self::GROUP === sanitize_key( wp_unslash( $_POST['option_page'] ) );
+	}
+
+	/**
 	 * Sanitize the submitted settings.
 	 *
 	 * @param mixed $input Raw posted value.
@@ -617,11 +646,31 @@ class Temso_Settings {
 		// it collapses whitespace and strips `%xx` octets, both of which can
 		// silently mangle a secret.
 		$sanitized = array(
-			'enabled'        => ! empty( $input['enabled'] ),
 			'ingest_url'     => $url,
 			'api_key'        => isset( $input['api_key'] ) ? sanitize_key( $input['api_key'] ) : '',
 			'publish_secret' => $publish_secret,
 		);
+
+		// get() reads an absent `enabled` as "the admin has never chosen" and
+		// defaults it on, so this sanitizer must never invent the key on a write
+		// that carried no opinion about it. save_option_fields() (the publishing
+		// claim) pre-merges the stored option, so a saved choice arrives in
+		// $input on that path; the $existing fallback covers writers that do not
+		// merge. Writing a default false for those would turn "never chosen"
+		// into "explicitly off" behind the admin's back.
+		//
+		// A settings-form save is the one write that does mean "off" by omission:
+		// an unchecked box posts nothing, and while the form's hidden 0 covers
+		// that for pages this version rendered, a page still open from before it
+		// existed has no hidden field. Without this branch the admin would
+		// uncheck, save, and silently stay tracked.
+		if ( array_key_exists( 'enabled', $input ) ) {
+			$sanitized['enabled'] = ! empty( $input['enabled'] );
+		} elseif ( self::is_settings_form_submission() ) {
+			$sanitized['enabled'] = false;
+		} elseif ( array_key_exists( 'enabled', $existing ) ) {
+			$sanitized['enabled'] = ! empty( $existing['enabled'] );
+		}
 
 		// Connection status fields. register_setting() runs this sanitizer on
 		// EVERY update_option() for this option — including the setup-token AJAX
@@ -678,6 +727,8 @@ class Temso_Settings {
 					<tr>
 						<th scope="row"><?php esc_html_e( 'Tracking', 'temso-ai' ); ?></th>
 						<td>
+							<?php // Unchecked checkboxes post nothing; this hidden 0 is what makes unchecking an explicit choice. The checkbox posts after it and wins when checked. ?>
+							<input type="hidden" name="<?php echo esc_attr( self::OPTION ); ?>[enabled]" value="0" />
 							<label>
 								<input type="checkbox" name="<?php echo esc_attr( self::OPTION ); ?>[enabled]" value="1" <?php checked( $settings['enabled'] ); ?> />
 								<?php esc_html_e( 'Send all server-side requests to Temso', 'temso-ai' ); ?>
