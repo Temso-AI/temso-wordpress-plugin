@@ -142,6 +142,7 @@ final class PublisherTest extends TestCase {
 	}
 
 	protected function tearDown(): void {
+		unset( $_POST['option_page'] );
 		Monkey\tearDown();
 		parent::tearDown();
 	}
@@ -1386,5 +1387,177 @@ final class PublisherTest extends TestCase {
 		$this->assertSame( 1718000123, $out['publishing_connected_at'] );
 		$this->assertSame( 'https://example.com', $out['publishing_site_url'] );
 		$this->assertSame( 'https://example.com/wp-json/temso/v1', $out['publishing_rest_base_url'] );
+	}
+
+	public function test_settings_get_defaults_enabled_when_option_is_absent(): void {
+		// No option row at all — a fresh install must default to on.
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertTrue( Temso_Settings::get()['enabled'] );
+	}
+
+	public function test_settings_get_defaults_enabled_when_saved_array_has_no_enabled_key(): void {
+		// Other fields were saved (e.g. by the publishing claim) but the admin
+		// never touched the checkbox — still defaults to on.
+		Functions\when( 'get_option' )->justReturn( array( 'publish_secret' => 'kept-secret-value-123456' ) );
+
+		$this->assertTrue( Temso_Settings::get()['enabled'] );
+	}
+
+	public function test_settings_get_respects_explicit_enabled_false(): void {
+		// An explicit off must survive — this is the case the default-on change
+		// must not clobber.
+		Functions\when( 'get_option' )->justReturn( array( 'enabled' => false ) );
+
+		$this->assertFalse( Temso_Settings::get()['enabled'] );
+	}
+
+	public function test_settings_get_respects_explicit_enabled_true(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'enabled' => true ) );
+
+		$this->assertTrue( Temso_Settings::get()['enabled'] );
+	}
+
+	public function test_settings_get_defaults_enabled_when_option_is_not_an_array(): void {
+		// Guards the ! is_array( $saved ) branch — a corrupt/non-array option
+		// value must still fall back to the default rather than fatal.
+		Functions\when( 'get_option' )->justReturn( '' );
+
+		$this->assertTrue( Temso_Settings::get()['enabled'] );
+	}
+
+	public function test_settings_sanitizer_enabled_true_from_checked_checkbox(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'enabled'    => '1',
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$this->assertTrue( $out['enabled'] );
+	}
+
+	public function test_settings_sanitizer_enabled_false_from_hidden_input(): void {
+		// The hidden `0` field is what posts when the checkbox is unchecked.
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'enabled'    => '0',
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$this->assertFalse( $out['enabled'] );
+	}
+
+	public function test_settings_sanitizer_leaves_enabled_absent_when_never_chosen(): void {
+		// Regression guard: the publishing-claim AJAX (save_option_fields()) also
+		// runs through this sanitizer, and it never carries an `enabled` key. If
+		// neither the input nor the stored option has one, the key must stay
+		// absent from the sanitized output — writing a default false here would
+		// silently convert "never chosen" into "explicitly off", since get()
+		// reads an absent key as default-on but a stored `false` as off.
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$this->assertArrayNotHasKey( 'enabled', $out );
+	}
+
+	public function test_settings_sanitizer_treats_a_form_save_with_no_enabled_key_as_off(): void {
+		// A settings page rendered before the hidden `0` field existed posts
+		// nothing at all for an unchecked box. Such a save still has to turn
+		// tracking off — otherwise an admin unchecks, saves, and stays tracked.
+		Functions\when( 'get_option' )->justReturn( array( 'enabled' => true ) );
+		Functions\when( 'wp_unslash' )->returnArg();
+		$_POST['option_page'] = 'temso_settings_group';
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$this->assertFalse( $out['enabled'] );
+	}
+
+	public function test_settings_sanitizer_ignores_a_foreign_option_page_marker(): void {
+		// Only this plugin's own settings group may be read as "a form save
+		// omitted the checkbox"; another option group's save must not touch it.
+		Functions\when( 'get_option' )->justReturn( array() );
+		Functions\when( 'wp_unslash' )->returnArg();
+		$_POST['option_page'] = 'some_other_plugin_group';
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$this->assertArrayNotHasKey( 'enabled', $out );
+	}
+
+	public function test_settings_sanitizer_keeps_enabled_false_on_a_claim_shaped_write(): void {
+		// The publishing claim writes through save_option_fields(), which merges
+		// its change into the stored option first — so a saved choice reaches the
+		// sanitizer in $input, not only in $existing. This pins that branch: a
+		// claim on a site that deliberately turned tracking off must not revive it.
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'enabled'    => false,
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'enabled'        => false,
+				'ingest_url'     => '',
+				'api_key'        => '',
+				'publish_secret' => 'claim-generated-secret-123',
+			)
+		);
+
+		$this->assertFalse( $out['enabled'] );
+		$this->assertSame( 'claim-generated-secret-123', $out['publish_secret'] );
+	}
+
+	public function test_settings_sanitizer_carries_forward_stored_enabled_false(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'enabled' => false ) );
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$this->assertFalse( $out['enabled'] );
+	}
+
+	public function test_settings_sanitizer_carries_forward_stored_enabled_true(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'enabled' => true ) );
+
+		$out = ( new Temso_Settings() )->sanitize(
+			array(
+				'ingest_url' => '',
+				'api_key'    => '',
+			)
+		);
+
+		$this->assertTrue( $out['enabled'] );
 	}
 }
