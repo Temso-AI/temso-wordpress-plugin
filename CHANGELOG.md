@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v1.1.0...v1.1.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* address default in UI ([7b8ab70](https://github.com/Temso-AI/temso-wordpress-plugin/commit/7b8ab70a70c38c6d6b6c3c53f0eb7dd944ad2584))
+* address defaults in UI ([b26c90c](https://github.com/Temso-AI/temso-wordpress-plugin/commit/b26c90c506e8cd5f19047a2649ceccc09d8e9d40))
+
 ## [1.1.0](https://github.com/Temso-AI/temso-wordpress-plugin/compare/v1.0.1...v1.1.0) (2026-07-03)
 
 
